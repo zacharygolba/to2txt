@@ -20,10 +20,7 @@ export default function Home(): JSX.Element {
               anonymousPro.className
             )}
           >
-            <a
-              href="https://github.com/zacharygolba/todotxt-rs"
-              target="_blank"
-            >
+            <a href="https://crates.io/crates/to2txt" target="_blank">
               to2txt repl
             </a>
           </header>
