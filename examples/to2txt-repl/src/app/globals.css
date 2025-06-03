@@ -1,12 +1,28 @@
 @import "tailwindcss";
 
-:root {
-  --background: #7c31d7;
-}
-
 body {
   color: #ffffff;
   font-size: 16px;
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+.viewport {
+  animation: Gradient 42s ease infinite;
+  background: linear-gradient(-45deg, #EE7752, #E73C7E, #9B59B6, #23A6D5, #1ABC9C, #23D5AB, #F39C12);
+  background-size: 400% 400%;
+}
+
+.window {
+  background: #1f212d;
+}
+
+@keyframes Gradient {
+  0% {
+    background-position: 0% 50%
+  }
+  50% {
+    background-position: 100% 50%
+  }
+  100% {
+    background-position: 0% 50%
+  }
 }

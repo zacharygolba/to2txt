@@ -21,7 +21,7 @@ export function Output(props: OutputProps): JSX.Element {
   return (
     <code
       className={clsx(
-        "text-white/40 whitespace-pre-wrap leading-none",
+        "text-white/50 whitespace-pre-wrap leading-0",
         props.className
       )}
     >
