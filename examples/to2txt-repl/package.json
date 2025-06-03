@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
+    "build-rust": "./scripts/build-rust.sh",
     "start": "next start",
     "lint": "next lint"
   },

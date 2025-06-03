@@ -2,6 +2,7 @@
 
 import React, { JSX, useState } from "react";
 import clsx from "clsx";
+import Link from "next/link";
 
 import { Input } from "@playground/components/input";
 import { Output } from "@playground/components/output";
@@ -13,16 +14,16 @@ export default function Home(): JSX.Element {
   return (
     <div className="bg-[#15161d] flex flex-col absolute top-2 right-2 bottom-2 left-2 overflow-hidden rounded">
       <main className="grid grid-cols-1 md:grid-cols-2 gap-[20px] h-full overflow-hidden">
-        <section className="flex flex-col h-full border-r border-[#383842] border-dashed overflow-hidden">
+        <section className="flex flex-col h-1/2 md:h-full md:border-r md:border-[#383842] border-dashed overflow-hidden">
           <header
             className={clsx(
               "flex-shrink-0 h-16 px-4.5 text-2xl leading-[4rem] select-none whitespace-nowrap",
               anonymousPro.className
             )}
           >
-            <a href="https://crates.io/crates/to2txt" target="_blank">
+            <Link href="https://crates.io/crates/to2txt" target="_blank">
               to2txt repl
-            </a>
+            </Link>
           </header>
           <div className="h-full overflow-hidden">
             <Input
@@ -35,7 +36,7 @@ export default function Home(): JSX.Element {
             />
           </div>
         </section>
-        <section className="h-full py-4 overflow-x-hidden overflow-y-auto">
+        <section className="h-1/2 md:h-full py-4 overflow-x-hidden overflow-y-auto">
           <Output
             className={clsx("text-sm", anonymousPro.className)}
             value={tasks}

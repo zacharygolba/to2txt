@@ -1,5 +1,5 @@
 [workspace]
 members = [
-  "examples/to2txt-repl/src/parser",
+  "examples/to2txt-repl/wasm",
   "to2txt",
 ]
