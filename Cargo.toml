@@ -1,5 +1,5 @@
 [workspace]
 members = [
-  "examples/todotxt-playground/src/parser",
-  "todotxt",
+  "examples/to2txt-repl/src/parser",
+  "to2txt",
 ]
