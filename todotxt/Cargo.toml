@@ -4,18 +4,15 @@ version = "0.1.0"
 authors = ["Zachary Golba <zachary.golba@postlight.com>"]
 edition = "2021"
 
+[features]
+default = []
+serde = ["dep:serde", "chrono/serde"]
+
 [dependencies]
+chrono = "0.4"
 nom = "8"
 
-[dependencies.chrono]
-features = ["serde"]
-version = "0.4"
-
-[dependencies.rayon]
-optional = true
-version = "1.2"
-
 [dependencies.serde]
+version = "1"
 features = ["derive"]
 optional = true
-version = "1.0"
