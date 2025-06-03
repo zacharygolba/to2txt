@@ -13,6 +13,7 @@ export interface InputProps {
 export function Input(props: InputProps): JSX.Element {
   return (
     <textarea
+      autoCapitalize="none"
       spellCheck={false}
       placeholder={`(A) feed the tomato plants @garden +home`}
       className={clsx(

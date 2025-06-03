@@ -1,0 +1,17 @@
+.pane {
+  @apply h-full;
+
+  &:first-of-type {
+    @apply border-b border-dashed;
+    border-color: #383842;
+
+    @media (width >= 48rem) {
+      @apply border-b-0 border-r;
+    }
+  }
+}
+
+.inputContainer {
+  @apply overflow-hidden;
+  height: calc(100% - 4rem);
+}

@@ -7,14 +7,15 @@ import Link from "next/link";
 import { Input } from "@playground/components/input";
 import { Output } from "@playground/components/output";
 import { anonymousPro, inter } from "@playground/styles/font";
+import styles from "@playground/styles/page.module.css";
 
 export default function Home(): JSX.Element {
   const [tasks, setTasks] = useState("");
 
   return (
     <div className="flex flex-col absolute top-2 right-2 bottom-2 left-2 overflow-hidden rounded window">
-      <main className="grid grid-cols-1 md:grid-cols-2 gap-[20px] h-full overflow-hidden">
-        <section className="flex flex-col h-1/2 md:h-full md:border-r md:border-[#383842] border-dashed overflow-hidden">
+      <main className="grid h-full w-full grid-rows-2 gap-5 overflow-hidden md:grid-cols-2 md:grid-rows-1">
+        <section className={styles.pane}>
           <header
             className={clsx(
               "flex-shrink-0 h-16 px-4.5 text-2xl leading-[4rem] select-none whitespace-nowrap",
@@ -25,10 +26,10 @@ export default function Home(): JSX.Element {
               to2txt repl
             </Link>
           </header>
-          <div className="h-full overflow-hidden">
+          <div className={styles.inputContainer}>
             <Input
               className={clsx(
-                "min-h-full w-full text-sm text-gray-200 leading-loose px-4.5",
+                "min-h-full w-full text-sm text-gray-200 px-4.5 leading-relaxed",
                 inter.className
               )}
               onChange={setTasks}
@@ -36,7 +37,12 @@ export default function Home(): JSX.Element {
             />
           </div>
         </section>
-        <section className="h-1/2 md:h-full py-4 overflow-x-hidden overflow-y-auto">
+        <section
+          className={clsx(
+            styles.pane,
+            "px-4.5 overflow-x-hidden overflow-y-auto md:px-0 md:py-4"
+          )}
+        >
           <Output
             className={clsx("text-sm", anonymousPro.className)}
             value={tasks}
