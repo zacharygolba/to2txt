@@ -4,8 +4,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "todotxt-rs repl",
-  description: "A repl for the todotxt-rs parser.",
+  title: "to2txt repl",
+  description: "A repl for the to2txt parser.",
 };
 
 export interface RootLayoutProps {
