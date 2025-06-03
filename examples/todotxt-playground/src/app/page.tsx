@@ -24,7 +24,7 @@ export default function Home(): JSX.Element {
               href="https://github.com/zacharygolba/todotxt-rs"
               target="_blank"
             >
-              todo.txt
+              to2txt repl
             </a>
           </header>
           <div className="h-full overflow-hidden">

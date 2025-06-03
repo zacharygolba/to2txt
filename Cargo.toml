@@ -1,6 +1,5 @@
 [workspace]
 members = [
   "examples/todotxt-playground/src/parser",
-  "examples/todotxt-to-json",
   "todotxt",
 ]
