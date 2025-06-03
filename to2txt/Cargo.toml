@@ -1,0 +1,22 @@
+[package]
+name = "to2txt"
+version = "0.1.0"
+authors = ["Zachary Golba <zachary.golba@postlight.com>"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "A zero-copy parser for the todo.txt format."
+homepage = "https://github.com/zacharygolba/to2txt"
+repository = "https://github.com/zacharygolba/to2txt"
+
+[features]
+default = []
+serde = ["dep:serde", "chrono/serde"]
+
+[dependencies]
+chrono = "0.4"
+nom = "8"
+
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+optional = true

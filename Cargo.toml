@@ -1,6 +1,5 @@
 [workspace]
 members = [
-  "examples/todotxt-playground/rust",
-  "examples/todotxt-to-json",
-  "todotxt",
+  "examples/to2txt-repl/wasm",
+  "to2txt",
 ]

@@ -1,9 +1,0 @@
-{
-  "extends": "./shared.tsconfig.json",
-  "compilerOptions": {
-    "jsx": "react",
-    "module": "esnext",
-    "target": "es2015"
-  },
-  "include": ["../../src", "../../rust/pkg"]
-}
