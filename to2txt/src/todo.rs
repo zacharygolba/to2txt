@@ -1,6 +1,6 @@
 use chrono::NaiveDate;
 use nom::bytes::complete::{is_not, tag, take};
-use nom::character::complete::{one_of, space1};
+use nom::character::complete::one_of;
 use nom::combinator::{into, map, map_opt, map_res, opt};
 use nom::sequence::{delimited, terminated};
 use nom::Parser;
@@ -42,7 +42,7 @@ fn checkmark<'a>() -> impl Parser<&'a str, Output = bool, Error = Error<'a>> {
 fn priority<'a>() -> impl Parser<&'a str, Output = Priority, Error = Error<'a>> {
     into(terminated(
         delimited(tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
-        space1,
+        tag(" "),
     ))
 }
 

@@ -1,11 +1,11 @@
 [package]
 name = "to2txt"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Zachary Golba <zachary.golba@postlight.com>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "A zero-copy parser for the todo.txt format."
-homepage = "https://github.com/zacharygolba/to2txt"
+homepage = "https://to2txt.vercel.app/"
 repository = "https://github.com/zacharygolba/to2txt"
 
 [features]
