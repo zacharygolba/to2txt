@@ -1,0 +1,15 @@
+#!/bin/bash
+set -e
+
+# Install Rust (non-interactive)
+curl https://sh.rustup.rs -sSf | sh -s -- -y
+
+# Add Rust to path
+source $HOME/.cargo/env
+
+# Install the wasm-pack command with cargo
+cargo install wasm-pack
+
+# Build the rust library
+cd ./wasm
+wasm-pack build
