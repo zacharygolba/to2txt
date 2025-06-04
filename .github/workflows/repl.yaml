@@ -11,19 +11,23 @@ env:
 
 jobs:
   lint-and-test:
+    name: lint and test
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: "pnpm"
 
-      - name: Install
-        run: npm ci
+      - name: Configure Node.js
+        run: corepack enable && corepack prepare pnpm@latest --activate
+
+      - name: Install Dependencies
+        run: pnpm install
         working-directory: ./examples/to2txt-repl
 
       - name: Lint
@@ -36,9 +40,9 @@ jobs:
 
       - name: Build Rust
         run: |
-          rustup component add clippy rustfmt
-          rustc --version
-        working-directory: ./examples/to2txt-repl
+          cargo install wasm-pack
+          wasm-pack build
+        working-directory: ./examples/to2txt-repl/wasm
 
       - name: Test
         run: pnpm test
