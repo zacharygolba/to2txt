@@ -22,7 +22,7 @@ export function Output(props: OutputProps): JSX.Element {
     <code
       className={clsx(
         "text-white/50 whitespace-pre-wrap leading-0",
-        props.className
+        props.className,
       )}
     >
       {parser && props.value && parser.parse(props.value)}

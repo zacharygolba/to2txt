@@ -1,0 +1,44 @@
+name: repl
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint-and-test:
+    name: lint and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Configure Node.js
+        run: corepack enable && corepack prepare pnpm@latest --activate
+
+      - name: Install Dependencies
+        run: pnpm install
+        working-directory: ./examples/to2txt-repl
+
+      - name: Lint
+        run: pnpm lint
+        working-directory: ./examples/to2txt-repl
+
+      - name: Format
+        run: pnpm fmt
+        working-directory: ./examples/to2txt-repl
+
+      - name: Build Rust
+        run: |
+          cargo install wasm-pack
+          wasm-pack build
+        working-directory: ./examples/to2txt-repl/wasm

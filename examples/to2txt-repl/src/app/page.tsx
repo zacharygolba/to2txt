@@ -4,10 +4,10 @@ import React, { JSX, useState } from "react";
 import clsx from "clsx";
 import Link from "next/link";
 
-import { Input } from "@playground/components/input";
-import { Output } from "@playground/components/output";
-import { anonymousPro, inter } from "@playground/styles/font";
-import styles from "@playground/styles/page.module.css";
+import { Input } from "@repl/components/input";
+import { Output } from "@repl/components/output";
+import { anonymousPro, inter } from "@repl/styles/font";
+import styles from "@repl/styles/page.module.css";
 
 export default function Home(): JSX.Element {
   const [tasks, setTasks] = useState("");
@@ -19,7 +19,7 @@ export default function Home(): JSX.Element {
           <header
             className={clsx(
               "flex-shrink-0 h-16 px-4.5 text-2xl leading-[4rem] select-none whitespace-nowrap",
-              anonymousPro.className
+              anonymousPro.className,
             )}
           >
             <Link href="https://crates.io/crates/to2txt" target="_blank">
@@ -30,7 +30,7 @@ export default function Home(): JSX.Element {
             <Input
               className={clsx(
                 "min-h-full w-full text-sm text-gray-200 px-4.5 leading-relaxed",
-                inter.className
+                inter.className,
               )}
               onChange={setTasks}
               value={tasks}
@@ -40,7 +40,7 @@ export default function Home(): JSX.Element {
         <section
           className={clsx(
             styles.pane,
-            "px-4.5 overflow-x-hidden overflow-y-auto md:px-0 md:py-4"
+            "px-4.5 overflow-x-hidden overflow-y-auto md:px-0 md:py-4",
           )}
         >
           <Output

@@ -53,9 +53,8 @@ fn ymd<'a>() -> impl Parser<&'a str, Output = NaiveDate, Error = Error<'a>> {
         map_res(take(2usize), str::parse::<u32>),
     );
 
-    map_opt(terminated(triple, tag(" ")), |output| {
-        let (year, month, day) = output;
-        NaiveDate::from_ymd_opt(year, month, day)
+    map_opt(terminated(triple, tag(" ")), |(y, m, d)| {
+        NaiveDate::from_ymd_opt(y, m, d)
     })
 }
 
@@ -138,7 +137,7 @@ impl<'a> Todo<'a> {
             priority,
             date_completed,
             date_started,
-            description: Cow::Borrowed(description.trim_end()),
+            description: Cow::Borrowed(description),
         }
     }
 }
