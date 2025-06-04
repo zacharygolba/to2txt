@@ -1,6 +1,6 @@
 "use client";
 
-import React, { JSX, useMemo } from "react";
+import React, { JSX } from "react";
 import clsx from "clsx";
 
 export interface InputProps {
