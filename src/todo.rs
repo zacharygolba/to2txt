@@ -49,8 +49,8 @@ pub struct Span {
 pub struct Todo<'a> {
     checkmark: Option<Span>,
     priority: Option<Priority>,
-    date_completed: Option<YearMonthDay>,
-    date_started: Option<YearMonthDay>,
+    completed: Option<YearMonthDay>,
+    started: Option<YearMonthDay>,
     description: Description<'a>,
 }
 
@@ -170,19 +170,19 @@ impl Span {
 
 impl Todo<'_> {
     pub fn is_done(&self) -> bool {
-        self.checkmark.is_some() || self.date_completed.is_some()
+        self.checkmark.is_some() || self.completed.is_some()
     }
 
     pub fn priority(&self) -> Option<&Priority> {
         self.priority.as_ref()
     }
 
-    pub fn date_completed(&self) -> Option<&NaiveDate> {
-        self.date_completed.as_ref().map(|ymd| &ymd.date)
+    pub fn completed(&self) -> Option<&NaiveDate> {
+        self.completed.as_ref().map(|ymd| &ymd.date)
     }
 
-    pub fn date_started(&self) -> Option<&NaiveDate> {
-        self.date_started.as_ref().map(|ymd| &ymd.date)
+    pub fn started(&self) -> Option<&NaiveDate> {
+        self.started.as_ref().map(|ymd| &ymd.date)
     }
 
     pub fn description(&self) -> &str {
@@ -222,8 +222,8 @@ impl<'a> Todo<'a> {
         Self {
             checkmark,
             priority,
-            date_completed,
-            date_started,
+            completed: date_completed,
+            started: date_started,
             description: Description {
                 text: Cow::Borrowed(description.fragment()),
                 span: Span::locate(&description, description.len()),
@@ -242,8 +242,8 @@ impl Serialize for Todo<'_> {
 
         state.serialize_field("checkmark", &self.checkmark)?;
         state.serialize_field("priority", &self.priority)?;
-        state.serialize_field("date_completed", &self.date_completed)?;
-        state.serialize_field("date_started", &self.date_started)?;
+        state.serialize_field("date_completed", &self.completed)?;
+        state.serialize_field("date_started", &self.started)?;
         state.serialize_field("description", &self.description)?;
         state.serialize_field("tags", &tags)?;
 
