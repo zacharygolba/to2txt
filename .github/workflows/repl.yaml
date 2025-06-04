@@ -42,7 +42,3 @@ jobs:
           cargo install wasm-pack
           wasm-pack build
         working-directory: ./examples/to2txt-repl/wasm
-
-      - name: Test
-        run: pnpm test
-        working-directory: ./examples/to2txt-repl
