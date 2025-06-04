@@ -52,11 +52,9 @@ pub struct Todo<'a> {
     pub(crate) _priv: (),
 }
 
-struct SerializeTags<'a>(&'a Todo<'a>);
-impl Serialize for SerializeTags<'_> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(self.0.tags())
-    }
+#[cfg(feature = "serde")]
+struct SerializeTags<'a> {
+    todo: &'a Todo<'a>,
 }
 
 impl Priority {
@@ -148,6 +146,13 @@ impl<'a> Todo<'a> {
 }
 
 #[cfg(feature = "serde")]
+impl Serialize for SerializeTags<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.todo.tags())
+    }
+}
+
+#[cfg(feature = "serde")]
 impl Serialize for Todo<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
@@ -159,7 +164,7 @@ impl Serialize for Todo<'_> {
         state.serialize_field("completed", &self.completed)?;
         state.serialize_field("started", &self.started)?;
         state.serialize_field("description", &self.description)?;
-        state.serialize_field("tags", &SerializeTags(&self))?;
+        state.serialize_field("tags", &SerializeTags { todo: &self })?;
 
         state.end()
     }
