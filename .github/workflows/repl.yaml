@@ -32,6 +32,11 @@ jobs:
           working-directory: ./examples/to2txt-repl
         run: pnpm lint
 
+      - name: Format
+        with:
+          working-directory: ./examples/to2txt-repl
+        run: pnpm fmt
+
       - name: Build Rust
         with:
           working-directory: ./examples/to2txt-repl
@@ -44,8 +49,3 @@ jobs:
         with:
           working-directory: ./examples/to2txt-repl
         run: pnpm test
-
-      - name: Prettier
-        with:
-          working-directory: ./examples/to2txt-repl
-        run: pnpm fmt
