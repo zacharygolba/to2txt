@@ -23,28 +23,23 @@ jobs:
           cache: "pnpm"
 
       - name: Install
-        with:
-          working-directory: ./examples/to2txt-repl
         run: npm ci
+        working-directory: ./examples/to2txt-repl
 
       - name: Lint
-        with:
-          working-directory: ./examples/to2txt-repl
         run: pnpm lint
+        working-directory: ./examples/to2txt-repl
 
       - name: Format
-        with:
-          working-directory: ./examples/to2txt-repl
         run: pnpm fmt
+        working-directory: ./examples/to2txt-repl
 
       - name: Build Rust
-        with:
-          working-directory: ./examples/to2txt-repl
         run: |
           rustup component add clippy rustfmt
           rustc --version
+        working-directory: ./examples/to2txt-repl
 
       - name: Test
-        with:
-          working-directory: ./examples/to2txt-repl
         run: pnpm test
+        working-directory: ./examples/to2txt-repl
