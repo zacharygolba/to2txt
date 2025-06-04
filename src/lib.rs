@@ -1,7 +1,5 @@
-mod parse;
-mod tag;
-mod todo;
+mod parser;
+mod todotxt;
 
-pub use parse::from_str;
-pub use tag::Tag;
-pub use todo::{Located, Priority, Span, Todo};
+pub use parser::from_str;
+pub use todotxt::{Located, Priority, Span, Tag, Todo};

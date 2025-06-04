@@ -3,12 +3,21 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 
 #[cfg(feature = "serde")]
-use serde::ser::SerializeStruct;
-#[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 
-use crate::parse::Input;
-use crate::tag::{tags, Tag};
+use crate::parser::{self, Input};
+
+#[cfg_attr(
+    feature = "serde",
+    derive(Serialize),
+    serde(tag = "type", rename_all = "lowercase")
+)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Tag<'a> {
+    Context(Located<&'a str>),
+    Project(Located<&'a str>),
+    Named(Located<(&'a str, &'a str)>),
+}
 
 /// TODO: docs
 ///
@@ -24,7 +33,7 @@ pub struct Located<T> {
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Copy, Debug, Hash, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct Span {
     line: u32,
     offset: (usize, usize),
@@ -41,6 +50,13 @@ pub struct Todo<'a> {
     pub description: Located<Cow<'a, str>>,
 
     pub(crate) _priv: (),
+}
+
+struct SerializeTags<'a>(&'a Todo<'a>);
+impl Serialize for SerializeTags<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.0.tags())
+    }
 }
 
 impl Priority {
@@ -111,7 +127,7 @@ impl Todo<'_> {
     ///
     pub fn tags(&self) -> impl Iterator<Item = Tag> {
         let description = &self.description;
-        tags(description.span, description.data.as_ref())
+        parser::tags(description.span, description.data.as_ref())
     }
 }
 
@@ -134,17 +150,16 @@ impl<'a> Todo<'a> {
 #[cfg(feature = "serde")]
 impl Serialize for Todo<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use crate::tag::SerializeTags;
+        use serde::ser::SerializeStruct;
 
         let mut state = serializer.serialize_struct("Todo", 1)?;
-        let tags = SerializeTags(self.description.span, self.description());
 
         state.serialize_field("checkmark", &self.checkmark)?;
         state.serialize_field("priority", &self.priority)?;
         state.serialize_field("completed", &self.completed)?;
         state.serialize_field("started", &self.started)?;
         state.serialize_field("description", &self.description)?;
-        state.serialize_field("tags", &tags)?;
+        state.serialize_field("tags", &SerializeTags(&self))?;
 
         state.end()
     }
