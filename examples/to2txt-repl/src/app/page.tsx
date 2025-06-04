@@ -4,10 +4,10 @@ import React, { JSX, useState } from "react";
 import clsx from "clsx";
 import Link from "next/link";
 
-import { Input } from "@playground/components/input";
-import { Output } from "@playground/components/output";
-import { anonymousPro, inter } from "@playground/styles/font";
-import styles from "@playground/styles/page.module.css";
+import { Input } from "@repl/components/input";
+import { Output } from "@repl/components/output";
+import { anonymousPro, inter } from "@repl/styles/font";
+import styles from "@repl/styles/page.module.css";
 
 export default function Home(): JSX.Element {
   const [tasks, setTasks] = useState("");
