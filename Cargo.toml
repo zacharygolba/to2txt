@@ -1,5 +1,25 @@
+[package]
+name = "to2txt"
+version = "0.1.1"
+authors = ["Zachary Golba <zachary.golba@postlight.com>"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "A zero-copy parser for the todo.txt format."
+homepage = "https://to2txt.vercel.app/"
+repository = "https://github.com/zacharygolba/to2txt"
+
+[features]
+default = []
+serde = ["dep:serde", "chrono/serde"]
+
+[dependencies]
+chrono = "0.4"
+nom = "8"
+
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+optional = true
+
 [workspace]
-members = [
-  "examples/to2txt-repl/wasm",
-  "to2txt",
-]
+members = ["examples/to2txt-repl/wasm"]
