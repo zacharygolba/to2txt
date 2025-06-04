@@ -19,7 +19,7 @@ export default function Home(): JSX.Element {
           <header
             className={clsx(
               "flex-shrink-0 h-16 px-4.5 text-2xl leading-[4rem] select-none whitespace-nowrap",
-              anonymousPro.className
+              anonymousPro.className,
             )}
           >
             <Link href="https://crates.io/crates/to2txt" target="_blank">
@@ -30,7 +30,7 @@ export default function Home(): JSX.Element {
             <Input
               className={clsx(
                 "min-h-full w-full text-sm text-gray-200 px-4.5 leading-relaxed",
-                inter.className
+                inter.className,
               )}
               onChange={setTasks}
               value={tasks}
@@ -40,7 +40,7 @@ export default function Home(): JSX.Element {
         <section
           className={clsx(
             styles.pane,
-            "px-4.5 overflow-x-hidden overflow-y-auto md:px-0 md:py-4"
+            "px-4.5 overflow-x-hidden overflow-y-auto md:px-0 md:py-4",
           )}
         >
           <Output

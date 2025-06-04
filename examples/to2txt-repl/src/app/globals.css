@@ -7,7 +7,16 @@ body {
 
 .viewport {
   animation: Gradient 42s ease infinite;
-  background: linear-gradient(-45deg, #EE7752, #E73C7E, #9B59B6, #23A6D5, #1ABC9C, #23D5AB, #F39C12);
+  background: linear-gradient(
+    -45deg,
+    #ee7752,
+    #e73c7e,
+    #9b59b6,
+    #23a6d5,
+    #1abc9c,
+    #23d5ab,
+    #f39c12
+  );
   background-size: 400% 400%;
 }
 
@@ -17,12 +26,12 @@ body {
 
 @keyframes Gradient {
   0% {
-    background-position: 0% 50%
+    background-position: 0% 50%;
   }
   50% {
-    background-position: 100% 50%
+    background-position: 100% 50%;
   }
   100% {
-    background-position: 0% 50%
+    background-position: 0% 50%;
   }
 }

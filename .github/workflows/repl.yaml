@@ -1,0 +1,51 @@
+name: repl
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      - name: Install
+        with:
+          working-directory: ./examples/to2txt-repl
+        run: npm ci
+
+      - name: Lint
+        with:
+          working-directory: ./examples/to2txt-repl
+        run: pnpm lint
+
+      - name: Build Rust
+        with:
+          working-directory: ./examples/to2txt-repl
+        run: /
+          cargo install wasm-pack
+          cd wasm
+          wasm-pack build
+
+      - name: Test
+        with:
+          working-directory: ./examples/to2txt-repl
+        run: pnpm test
+
+      - name: Prettier
+        with:
+          working-directory: ./examples/to2txt-repl
+        run: pnpm fmt
