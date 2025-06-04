@@ -16,18 +16,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: setup
+      - name: Configure Rust
         run: |
           rustup component add clippy rustfmt
           rustc --version
 
-      - name: clippy
+      - name: Clippy
         run: cargo clippy --tests --examples -- -D warnings
 
-      - name: fmt
+      - name: Rustfmt
         run: cargo fmt --all -- --check
 
-      - name: docs
+      - name: Docs
         run: cargo doc --no-deps
 
   test:
@@ -41,14 +41,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: setup
+      - name: Configure Rust
         run: |
           rustup install ${{ matrix.rust }}
           rustup default ${{ matrix.rust }}
           rustup component add clippy rustfmt
           rustc --version
 
-      - name: cache
+      - name: Cache Dependencies
         uses: actions/cache@v4
         with:
           path: ~/.cargo/registry
@@ -56,8 +56,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-registry-
 
-      - name: build
+      - name: Build
         run: cargo build
 
-      - name: test
+      - name: Test
         run: cargo test
