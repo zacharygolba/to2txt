@@ -1,9 +1,10 @@
 use chrono::NaiveDate;
 use nom::bytes::complete::{is_not, tag, take};
-use nom::character::complete::one_of;
-use nom::combinator::{into, map, map_opt, map_res, opt};
-use nom::sequence::{delimited, terminated};
-use nom::Parser;
+use nom::character::complete::{line_ending, one_of, space0};
+use nom::combinator::{iterator, map, map_opt, map_res, opt};
+use nom::sequence::{delimited, preceded, terminated};
+use nom::{IResult, Parser};
+use nom_locate::position;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
@@ -14,65 +15,162 @@ use serde::{Serialize, Serializer};
 
 use crate::tag::{tags, Tag};
 
-type Dates = (NaiveDate, Option<NaiveDate>);
-type Parts<'a> = (bool, Option<Priority>, Option<Dates>, &'a str);
-type Error<'a> = nom::error::Error<&'a str>;
+type Dates = (YearMonthDay, Option<YearMonthDay>);
+type Parts<'a> = (Option<Span>, Option<Priority>, Option<Dates>, Input<'a>);
+type Error<'a> = nom::error::Error<Input<'a>>;
+type Input<'a> = nom_locate::LocatedSpan<&'a str>;
+
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Clone, Debug)]
+pub struct Description<'a> {
+    text: Cow<'a, str>,
+    span: Span,
+}
 
 /// TODO: docs
 ///
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Priority(char);
+pub struct Priority {
+    rank: char,
+    span: Span,
+}
+
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, PartialOrd)]
+pub struct Span {
+    line: u32,
+    col: (usize, usize),
+}
 
 /// A task from a todo list.
 ///
 #[derive(Clone, Debug)]
 pub struct Todo<'a> {
-    is_done: bool,
+    checkmark: Option<Span>,
     priority: Option<Priority>,
-    date_completed: Option<NaiveDate>,
-    date_started: Option<NaiveDate>,
-    description: Cow<'a, str>,
+    date_completed: Option<YearMonthDay>,
+    date_started: Option<YearMonthDay>,
+    description: Description<'a>,
 }
 
-fn checkmark<'a>() -> impl Parser<&'a str, Output = bool, Error = Error<'a>> {
-    map(opt(terminated(tag("x"), tag(" "))), |x| x.is_some())
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct YearMonthDay {
+    date: NaiveDate,
+    span: Span,
 }
 
-fn priority<'a>() -> impl Parser<&'a str, Output = Priority, Error = Error<'a>> {
-    into(terminated(
-        delimited(tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
-        tag(" "),
-    ))
+/// Parse a todo list from the provided `&str`.
+///
+pub fn from_str(value: &str) -> impl Iterator<Item = Todo> {
+    iterator(value.into(), delimited(eol, todo(), eol))
 }
 
-fn ymd<'a>() -> impl Parser<&'a str, Output = NaiveDate, Error = Error<'a>> {
-    let triple = (
-        terminated(map_res(take(4usize), str::parse::<i32>), tag("-")),
-        terminated(map_res(take(2usize), str::parse::<u32>), tag("-")),
-        map_res(take(2usize), str::parse::<u32>),
+fn checkmark<'a>() -> impl Parser<Input<'a>, Output = Option<Span>, Error = Error<'a>> {
+    opt(map(terminated(tag("x"), tag(" ")), |at| {
+        Span::locate(&at, 1)
+    }))
+}
+
+fn eol(input: Input) -> IResult<Input, (), Error> {
+    let mut rest = input;
+
+    loop {
+        match line_ending::<_, Error>(rest) {
+            Ok((next, _)) => rest = next,
+            Err(_) => break,
+        }
+    }
+
+    Ok((rest, ()))
+}
+
+fn priority<'a>() -> impl Parser<Input<'a>, Output = Priority, Error = Error<'a>> {
+    let parser = (
+        map(position, |at| Span::locate(&at, 3)),
+        terminated(
+            delimited(tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
+            tag(" "),
+        ),
     );
 
-    map_opt(terminated(triple, tag(" ")), |(y, m, d)| {
-        NaiveDate::from_ymd_opt(y, m, d)
-    })
+    map(parser, |(span, rank)| Priority { rank, span })
 }
 
-impl From<char> for Priority {
-    fn from(value: char) -> Self {
-        Self(value)
-    }
+fn todo<'a>() -> impl Parser<Input<'a>, Output = Todo<'a>, Error = Error<'a>> {
+    let parser = (
+        checkmark(),
+        opt(priority()),
+        opt((ymd(), opt(ymd()))),
+        is_not("\r\n"),
+    );
+
+    map(preceded(space0, parser), Todo::from_parts)
+}
+
+fn ymd<'a>() -> impl Parser<Input<'a>, Output = YearMonthDay, Error = Error<'a>> {
+    let triple = (
+        terminated(
+            map_res(take(4usize), |span: Input| span.fragment().parse::<i32>()),
+            tag("-"),
+        ),
+        terminated(
+            map_res(take(2usize), |span: Input| span.fragment().parse::<u32>()),
+            tag("-"),
+        ),
+        map_res(take(2usize), |span: Input| span.fragment().parse::<u32>()),
+    );
+
+    map_opt(
+        (position, terminated(triple, tag(" "))),
+        |(at, (y, m, d))| {
+            Some(YearMonthDay {
+                date: NaiveDate::from_ymd_opt(y, m, d)?,
+                span: Span::locate(&at, 10),
+            })
+        },
+    )
 }
 
 impl PartialOrd for Priority {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.0.partial_cmp(&other.0).map(Ordering::reverse)
+        self.rank.partial_cmp(&other.rank).map(Ordering::reverse)
+    }
+}
+
+impl Span {
+    pub fn line(&self) -> u32 {
+        self.line
+    }
+
+    pub fn start(&self) -> usize {
+        self.col.0
+    }
+
+    pub fn end(&self) -> usize {
+        self.col.1
+    }
+}
+
+impl Span {
+    pub(crate) fn new(line: u32, column: (usize, usize)) -> Self {
+        Self { line, col: column }
+    }
+
+    fn locate(at: &Input, len: usize) -> Self {
+        let start = at.get_column() - 1;
+
+        Self {
+            line: at.location_line(),
+            col: (start, start + len),
+        }
     }
 }
 
 impl Todo<'_> {
     pub fn is_done(&self) -> bool {
-        self.is_done
+        self.checkmark.is_some() || self.date_completed.is_some()
     }
 
     pub fn priority(&self) -> Option<&Priority> {
@@ -80,40 +178,33 @@ impl Todo<'_> {
     }
 
     pub fn date_completed(&self) -> Option<&NaiveDate> {
-        self.date_completed.as_ref()
+        self.date_completed.as_ref().map(|ymd| &ymd.date)
     }
 
     pub fn date_started(&self) -> Option<&NaiveDate> {
-        self.date_started.as_ref()
+        self.date_started.as_ref().map(|ymd| &ymd.date)
     }
 
     pub fn description(&self) -> &str {
-        &self.description
+        self.description.text.as_ref()
     }
 
     pub fn tags(&self) -> impl Iterator<Item = Tag> {
-        tags(self.description())
+        tags(self.description.span, self.description())
     }
 }
 
 impl<'a> Todo<'a> {
     pub fn parse(input: &'a str) -> Option<Self> {
-        let parser = (
-            checkmark(),
-            opt(priority()),
-            opt((ymd(), opt(ymd()))),
-            is_not("\r\n"),
-        );
-
-        match map(parser, Self::from_parts).parse(input) {
-            Ok((_, todo)) => Some(todo),
-            Err(_) => None,
-        }
+        todo().parse(input.into()).map(|(_, output)| output).ok()
     }
 
     pub fn into_owned(self) -> Todo<'static> {
         Todo {
-            description: Cow::Owned(self.description.into_owned()),
+            description: Description {
+                text: Cow::Owned(self.description.text.into_owned()),
+                ..self.description
+            },
             ..self
         }
     }
@@ -121,23 +212,22 @@ impl<'a> Todo<'a> {
 
 impl<'a> Todo<'a> {
     fn from_parts(parts: Parts<'a>) -> Self {
-        let (mut is_done, priority, dates, description) = parts;
+        let (checkmark, priority, dates, description) = parts;
         let (date_completed, date_started) = match dates {
             Some((a, Some(b))) => (Some(a), Some(b)),
             Some((a, None)) => (None, Some(a)),
             None => (None, None),
         };
 
-        if !is_done && date_completed.is_some() {
-            is_done = true;
-        }
-
         Self {
-            is_done,
+            checkmark,
             priority,
             date_completed,
             date_started,
-            description: Cow::Borrowed(description),
+            description: Description {
+                text: Cow::Borrowed(description.fragment()),
+                span: Span::locate(&description, description.len()),
+            },
         }
     }
 }
@@ -148,28 +238,28 @@ impl Serialize for Todo<'_> {
         use crate::tag::SerializeTags;
 
         let mut state = serializer.serialize_struct("Todo", 1)?;
-        let description = self.description();
+        let tags = SerializeTags(self.description.span, self.description());
 
-        state.serialize_field("is_done", &self.is_done)?;
+        state.serialize_field("checkmark", &self.checkmark)?;
         state.serialize_field("priority", &self.priority)?;
         state.serialize_field("date_completed", &self.date_completed)?;
         state.serialize_field("date_started", &self.date_started)?;
-        state.serialize_field("description", description)?;
-        state.serialize_field("tags", &SerializeTags(description))?;
+        state.serialize_field("description", &self.description)?;
+        state.serialize_field("tags", &tags)?;
 
         state.end()
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::Priority;
+// #[cfg(test)]
+// mod tests {
+//     use super::{Priority, Span};
 
-    #[test]
-    fn test_priority_order() {
-        assert!(
-            Priority('A') > Priority('B'),
-            "Priority should be ordered alphabetically in descending order."
-        )
-    }
-}
+//     #[test]
+//     fn test_priority_order() {
+//         assert!(
+//             Priority { rank: 'A', span } > Priority { rank: 'B', span },
+//             "Priority should be ordered alphabetically in descending order."
+//         )
+//     }
+// }

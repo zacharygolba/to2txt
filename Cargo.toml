@@ -15,6 +15,7 @@ serde = ["dep:serde", "chrono/serde"]
 [dependencies]
 chrono = "0.4"
 nom = "8"
+nom_locate = "5.0.0"
 
 [dependencies.serde]
 version = "1"

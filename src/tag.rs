@@ -3,12 +3,10 @@ use std::str::CharIndices;
 #[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 
-#[cfg(feature = "serde")]
-pub struct SerializeTags<'a>(pub &'a str);
+use crate::todo::Span;
 
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Copy, Debug, Hash, PartialEq, PartialOrd)]
-pub struct Span(usize, usize);
+#[cfg(feature = "serde")]
+pub struct SerializeTags<'a>(pub Span, pub &'a str);
 
 #[cfg_attr(
     feature = "serde",
@@ -18,17 +16,17 @@ pub struct Span(usize, usize);
 #[derive(Clone, Copy, Debug, Hash, PartialEq, PartialOrd)]
 pub enum Tag<'a> {
     Context {
+        data: &'a str,
         span: Span,
-        value: &'a str,
     },
     Project {
+        data: &'a str,
         span: Span,
-        value: &'a str,
     },
     Named {
-        span: Span,
         name: &'a str,
-        value: &'a str,
+        data: &'a str,
+        span: Span,
     },
 }
 
@@ -37,27 +35,35 @@ struct Tokens<'a> {
     len: usize,
 }
 
-pub fn tags(description: &str) -> impl Iterator<Item = Tag> {
-    Tokens::new(description).filter_map(|span| {
-        let token = &description[span.0..span.1];
+pub fn tags(at: Span, description: &str) -> impl Iterator<Item = Tag> {
+    let line = at.line();
+    let offset = at.start();
+
+    Tokens::new(description).filter_map(move |(start, end)| {
+        let token = &description[start..end];
+        let span = Span::new(line, (start + offset, end + offset));
 
         if token.starts_with('@') && token.len() > 1 {
             return Some(Tag::Context {
+                data: &token[1..],
                 span,
-                value: &token[1..],
             });
         }
 
         if token.starts_with('+') && token.len() > 1 {
             return Some(Tag::Project {
+                data: &token[1..],
                 span,
-                value: &token[1..],
             });
         }
 
         token.split_once(':').and_then(|(name, value)| {
             if !name.is_empty() && !value.is_empty() {
-                Some(Tag::Named { span, name, value })
+                Some(Tag::Named {
+                    span,
+                    name,
+                    data: value,
+                })
             } else {
                 None
             }
@@ -68,7 +74,7 @@ pub fn tags(description: &str) -> impl Iterator<Item = Tag> {
 #[cfg(feature = "serde")]
 impl Serialize for SerializeTags<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(tags(self.0))
+        serializer.collect_seq(tags(self.0, self.1))
     }
 }
 
@@ -82,7 +88,7 @@ impl<'a> Tokens<'a> {
 }
 
 impl<'a> Iterator for Tokens<'a> {
-    type Item = Span;
+    type Item = (usize, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
         let iter = &mut self.iter;
@@ -92,6 +98,6 @@ impl<'a> Iterator for Tokens<'a> {
             .find_map(|(i, c)| if c.is_whitespace() { Some(i) } else { None })
             .unwrap_or(self.len);
 
-        Some(Span(start, end))
+        Some((start, end))
     }
 }
