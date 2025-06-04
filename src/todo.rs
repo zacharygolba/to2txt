@@ -242,8 +242,8 @@ impl Serialize for Todo<'_> {
 
         state.serialize_field("checkmark", &self.checkmark)?;
         state.serialize_field("priority", &self.priority)?;
-        state.serialize_field("date_completed", &self.completed)?;
-        state.serialize_field("date_started", &self.started)?;
+        state.serialize_field("completed", &self.completed)?;
+        state.serialize_field("started", &self.started)?;
         state.serialize_field("description", &self.description)?;
         state.serialize_field("tags", &tags)?;
 
