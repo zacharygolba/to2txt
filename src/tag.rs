@@ -3,7 +3,7 @@ use std::str::CharIndices;
 #[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 
-use crate::todo::Span;
+use crate::todo::{Located, Span};
 
 #[cfg(feature = "serde")]
 pub struct SerializeTags<'a>(pub Span, pub &'a str);
@@ -13,21 +13,11 @@ pub struct SerializeTags<'a>(pub Span, pub &'a str);
     derive(Serialize),
     serde(tag = "type", rename_all = "lowercase")
 )]
-#[derive(Clone, Copy, Debug, Hash, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Tag<'a> {
-    Context {
-        data: &'a str,
-        span: Span,
-    },
-    Project {
-        data: &'a str,
-        span: Span,
-    },
-    Named {
-        name: &'a str,
-        data: &'a str,
-        span: Span,
-    },
+    Context(Located<&'a str>),
+    Project(Located<&'a str>),
+    Named(Located<(&'a str, &'a str)>),
 }
 
 struct Tokens<'a> {
@@ -44,26 +34,22 @@ pub fn tags(at: Span, description: &str) -> impl Iterator<Item = Tag> {
         let span = Span::new(line, (start + offset, end + offset));
 
         if token.starts_with('@') && token.len() > 1 {
-            return Some(Tag::Context {
+            return Some(Tag::Context(Located {
                 data: &token[1..],
                 span,
-            });
+            }));
         }
 
         if token.starts_with('+') && token.len() > 1 {
-            return Some(Tag::Project {
+            return Some(Tag::Project(Located {
                 data: &token[1..],
                 span,
-            });
+            }));
         }
 
-        token.split_once(':').and_then(|(name, value)| {
-            if !name.is_empty() && !value.is_empty() {
-                Some(Tag::Named {
-                    span,
-                    name,
-                    data: value,
-                })
+        token.split_once(':').and_then(|pair| {
+            if !pair.0.is_empty() && !pair.1.is_empty() {
+                Some(Tag::Named(Located { data: pair, span }))
             } else {
                 None
             }
