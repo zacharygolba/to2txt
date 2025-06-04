@@ -100,12 +100,8 @@ fn checkmark<'a>() -> impl Parser<Input<'a>, Output = Option<Span>, Error = Erro
 fn eol(input: Input) -> IResult<Input, (), Error> {
     let mut rest = input;
 
-    loop {
-        if let Ok((next, _)) = line_ending::<_, Error>(rest) {
-            rest = next;
-        } else {
-            break;
-        }
+    while let Ok((next, _)) = line_ending::<_, Error>(rest) {
+        rest = next;
     }
 
     Ok((rest, ()))

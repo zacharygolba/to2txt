@@ -42,6 +42,7 @@ pub struct Span {
 /// A task from a todo list.
 ///
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct Todo<'a> {
     pub checkmark: Option<Span>,
     pub priority: Option<Priority>,
