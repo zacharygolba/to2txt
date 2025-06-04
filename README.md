@@ -1,5 +1,7 @@
 # to2txt
 
+Undergoing significant renovations. The API should stabilize by the end of the week.
+
 ## License
 
 Licensed under either of

@@ -1,19 +1,5 @@
-mod tag;
-mod todo;
+mod parser;
+mod todotxt;
 
-pub use tag::{Span, Tag};
-pub use todo::{Priority, Todo};
-
-/// Parse a todo list from the provided `&str`.
-///
-pub fn from_str(value: &str) -> impl Iterator<Item = Todo> {
-    value.lines().filter_map(|line| {
-        let input = line.trim();
-
-        if !input.is_empty() {
-            Todo::parse(input)
-        } else {
-            None
-        }
-    })
-}
+pub use parser::from_str;
+pub use todotxt::{Located, Priority, Span, Tag, Todo};
