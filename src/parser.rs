@@ -86,7 +86,6 @@ pub fn todo<'a>() -> impl Parser<Input<'a>, Output = Todo<'a>, Error = Error<'a>
             completed,
             started,
             description,
-            _priv: (),
         }
     })
 }

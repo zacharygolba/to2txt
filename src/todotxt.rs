@@ -49,8 +49,6 @@ pub struct Todo<'a> {
     pub completed: Option<Located<NaiveDate>>,
     pub started: Option<Located<NaiveDate>>,
     pub description: Located<Cow<'a, str>>,
-
-    pub(crate) _priv: (),
 }
 
 #[cfg(feature = "serde")]
