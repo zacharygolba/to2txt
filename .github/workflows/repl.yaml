@@ -40,10 +40,9 @@ jobs:
       - name: Build Rust
         with:
           working-directory: ./examples/to2txt-repl
-        run: /
-          cargo install wasm-pack
-          cd wasm
-          wasm-pack build
+        run: |
+          rustup component add clippy rustfmt
+          rustc --version
 
       - name: Test
         with:
