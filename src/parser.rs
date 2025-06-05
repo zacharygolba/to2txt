@@ -1,18 +1,24 @@
-use std::borrow::Cow;
-use std::str::{CharIndices, FromStr};
-
 use chrono::NaiveDate;
+use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, take};
-use nom::character::complete::{line_ending, one_of, space0};
-use nom::combinator::{iterator, map, map_opt, map_res, opt};
+use nom::character::complete::{line_ending, one_of, space0, space1};
+use nom::combinator::{iterator, map, map_opt, map_res, opt, verify};
 use nom::sequence::{delimited, preceded, terminated};
 use nom::{IResult, Parser};
 use nom_locate::position;
+use std::borrow::Cow;
+use std::str::{CharIndices, FromStr};
 
-use crate::todotxt::{Located, Priority, Span, Tag, Todo};
+use crate::todotxt::{Description, Located, Priority, Span, Tag, Todo};
 
-pub type Error<'a> = nom::error::Error<Input<'a>>;
 pub type Input<'a> = nom_locate::LocatedSpan<&'a str>;
+
+type Error<'a> = nom::error::Error<Input<'a>>;
+type Headers = (
+    Option<Span>,
+    Option<Priority>,
+    Option<(Located<NaiveDate>, Option<Located<NaiveDate>>)>,
+);
 
 struct SplitWhitespace<'a> {
     iter: CharIndices<'a>,
@@ -22,16 +28,28 @@ struct SplitWhitespace<'a> {
 /// Parse a todo list from the provided `&str`.
 ///
 pub fn from_str(value: &str) -> impl Iterator<Item = Todo> {
-    iterator(value.into(), delimited(eol, todo(), eol))
+    iterator(value.into(), delimited(eol, todo(), eol)).filter(|todo| {
+        !todo.description.text().trim().is_empty()
+            || !matches!(
+                todo,
+                Todo {
+                    x: None,
+                    priority: None,
+                    date_completed: None,
+                    date_started: None,
+                    ..
+                }
+            )
+    })
 }
 
-pub fn tags(at: Span, description: &str) -> impl Iterator<Item = Tag> {
-    let line = at.line();
-    let offset = at.start();
+pub fn tags<'a>(description: &'a Description) -> impl Iterator<Item = Tag<'a>> {
+    let offset = description.span().start();
+    let text = description.text();
 
-    SplitWhitespace::new(description).filter_map(move |(start, end)| {
-        let token = &description[start..end];
-        let span = Span::new(line, (start + offset, end + offset));
+    SplitWhitespace::new(text).filter_map(move |(start, end)| {
+        let token = &text[start..end];
+        let span = Span::new(start + offset, end + offset);
 
         if token.starts_with('@') && token.len() > 1 {
             return Some(Tag::Context(Located {
@@ -60,43 +78,76 @@ pub fn tags(at: Span, description: &str) -> impl Iterator<Item = Tag> {
 /// Returns a parser that parses a single task on a todo list.
 ///
 pub fn todo<'a>() -> impl Parser<Input<'a>, Output = Todo<'a>, Error = Error<'a>> {
-    let parser = preceded(
-        space0,
-        (
-            checkmark(),
-            opt(priority()),
-            opt((ymd(), opt(ymd()))),
-            map(is_not("\r\n"), |output: Input<'a>| Located {
-                data: Cow::Borrowed(*output.fragment()),
-                span: Span::locate(&output, output.len()),
-            }),
+    alt((
+        map(
+            (position, preceded(space0, headers()), description()),
+            |(pos, headers, description)| {
+                let (x, priority, dates) = headers;
+                let (date_completed, date_started) = match dates {
+                    Some((first, Some(second))) => (Some(first), Some(second)),
+                    Some((first, None)) => (None, Some(first)),
+                    None => (None, None),
+                };
+                Todo {
+                    line: pos.location_line(),
+                    x,
+                    priority,
+                    date_completed,
+                    date_started,
+                    description,
+                }
+            },
         ),
-    );
-
-    map(parser, |(checkmark, priority, dates, description)| {
-        let (completed, started) = match dates {
-            Some((first, Some(second))) => (Some(first), Some(second)),
-            Some((first, None)) => (None, Some(first)),
-            None => (None, None),
-        };
-
-        Todo {
-            checkmark,
-            priority,
-            completed,
-            started,
+        map((position, description()), |(pos, description)| Todo {
+            line: pos.location_line(),
+            x: None,
+            priority: None,
+            date_completed: None,
+            date_started: None,
             description,
-        }
+        }),
+    ))
+}
+
+fn description<'a>() -> impl Parser<Input<'a>, Output = Description<'a>, Error = Error<'a>> {
+    map(is_not("\r\n"), |output: Input<'a>| {
+        let text = output.fragment().trim_end();
+        let offset = text.len() - text.trim_start().len();
+        let span_start = output.get_utf8_column() - 1 + offset;
+
+        Description(Located {
+            data: Cow::Borrowed(&text[offset..]),
+            span: Span::new(span_start, span_start + text.len()),
+        })
     })
 }
 
-fn checkmark<'a>() -> impl Parser<Input<'a>, Output = Option<Span>, Error = Error<'a>> {
-    opt(map(terminated(tag("x"), tag(" ")), |at| {
-        Span::locate(&at, 1)
-    }))
+fn headers<'a>() -> impl Parser<Input<'a>, Output = Headers, Error = Error<'a>> {
+    verify(
+        (
+            opt(map(terminated(tag("x"), space1), |pos| {
+                Span::locate(&pos, 1)
+            })),
+            opt(map(
+                (
+                    position,
+                    terminated(
+                        delimited(tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
+                        space1,
+                    ),
+                ),
+                |(pos, data)| {
+                    let span = Span::locate(&pos, 3);
+                    Priority(Located { data, span })
+                },
+            )),
+            opt((ymd(), opt(ymd()))),
+        ),
+        |output| !matches!(output, (None, None, None)),
+    )
 }
 
-fn eol(input: Input) -> IResult<Input, (), Error> {
+fn eol(input: Input) -> IResult<Input, ()> {
     let mut rest = input;
 
     while let Ok((next, _)) = line_ending::<_, Error>(rest) {
@@ -114,18 +165,6 @@ where
     map_res(parser, |output| output.fragment().parse())
 }
 
-fn priority<'a>() -> impl Parser<Input<'a>, Output = Priority, Error = Error<'a>> {
-    let parser = (
-        map(position, |at| Span::locate(&at, 3)),
-        terminated(
-            delimited(tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
-            tag(" "),
-        ),
-    );
-
-    map(parser, |(span, data)| Priority(Located { data, span }))
-}
-
 fn ymd<'a>() -> impl Parser<Input<'a>, Output = Located<NaiveDate>, Error = Error<'a>> {
     let triple = (
         terminated(parse_to(take(4usize)), tag("-")),
@@ -133,15 +172,12 @@ fn ymd<'a>() -> impl Parser<Input<'a>, Output = Located<NaiveDate>, Error = Erro
         parse_to(take(2usize)),
     );
 
-    map_opt(
-        (position, terminated(triple, tag(" "))),
-        |(at, (y, m, d))| {
-            Some(Located {
-                data: NaiveDate::from_ymd_opt(y, m, d)?,
-                span: Span::locate(&at, 10),
-            })
-        },
-    )
+    map_opt((position, terminated(triple, space1)), |(at, (y, m, d))| {
+        Some(Located {
+            data: NaiveDate::from_ymd_opt(y, m, d)?,
+            span: Span::locate(&at, 10),
+        })
+    })
 }
 
 impl<'a> SplitWhitespace<'a> {
