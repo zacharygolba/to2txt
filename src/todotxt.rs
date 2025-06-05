@@ -1,7 +1,10 @@
 use chrono::NaiveDate;
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::fmt::{self, Debug, Formatter};
 
+#[cfg(feature = "serde")]
+use serde::ser::SerializeStruct;
 #[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 
@@ -52,7 +55,7 @@ pub struct Span {
 
 /// A task from a todo list.
 ///
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Todo<'a> {
     pub(crate) line: u32,
     pub(crate) headers: Option<Headers>,
@@ -191,6 +194,27 @@ impl<'a> Todo<'a> {
     }
 }
 
+impl Debug for Todo<'_> {
+    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
+        struct DebugTags<'a> {
+            todo: &'a Todo<'a>,
+        }
+
+        impl Debug for DebugTags<'_> {
+            fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+                f.debug_list().entries(self.todo.tags()).finish()
+            }
+        }
+
+        fmt.debug_struct("Todo")
+            .field("line", &self.line)
+            .field("headers", &self.headers)
+            .field("description", &self.description)
+            .field("tags", &DebugTags { todo: self })
+            .finish()
+    }
+}
+
 #[cfg(feature = "serde")]
 impl Serialize for SerializeTags<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -201,8 +225,6 @@ impl Serialize for SerializeTags<'_> {
 #[cfg(feature = "serde")]
 impl Serialize for Todo<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeStruct;
-
         let mut state = serializer.serialize_struct("Todo", 1)?;
         let mut checkmark = None;
         let mut priority = None;
