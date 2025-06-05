@@ -30,15 +30,6 @@ pub enum Tag<'a> {
     Named(Located<(&'a str, &'a str)>),
 }
 
-#[derive(Clone, Debug)]
-#[non_exhaustive]
-pub struct Headers {
-    pub x: Option<Span>,
-    pub priority: Option<Priority>,
-    pub date_completed: Option<Located<NaiveDate>>,
-    pub date_started: Option<Located<NaiveDate>>,
-}
-
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Located<T> {
@@ -56,15 +47,14 @@ pub struct Span {
 /// A task from a todo list.
 ///
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct Todo<'a> {
-    pub(crate) line: u32,
-    pub(crate) headers: Option<Headers>,
-    pub(crate) description: Description<'a>,
-}
-
-#[cfg(feature = "serde")]
-struct SerializeTags<'a> {
-    todo: &'a Todo<'a>,
+    pub line: u32,
+    pub x: Option<Span>,
+    pub priority: Option<Priority>,
+    pub date_completed: Option<Located<NaiveDate>>,
+    pub date_started: Option<Located<NaiveDate>>,
+    pub description: Description<'a>,
 }
 
 impl Description<'_> {
@@ -77,7 +67,9 @@ impl Description<'_> {
     pub fn span(&self) -> &Span {
         self.0.span()
     }
+}
 
+impl Description<'_> {
     /// Returns an owned string containing the description text.
     ///
     pub fn into_string(self) -> String {
@@ -134,51 +126,33 @@ impl Span {
         Self { start, end }
     }
 
-    pub(crate) fn locate(at: &Input, len: usize) -> Self {
-        let start = at.get_utf8_column() - 1;
+    pub(crate) fn locate(input: &Input, len: usize) -> Self {
+        let start = input.get_utf8_column() - 1;
         let end = start + len;
         Self { start, end }
     }
 }
 
 impl Todo<'_> {
-    /// Returns a reference to the value of the todo's description.
+    /// Returns an iterator over the tags in the todo's description.
     ///
-    pub fn description(&self) -> &Description {
-        &self.description
-    }
-
-    pub fn headers(&self) -> Option<&Headers> {
-        self.headers.as_ref()
+    pub fn tags(&self) -> impl Iterator<Item = Tag> {
+        parser::tags(&self.description)
     }
 
     /// True if the todo starts with a lowercase "x" or has a `completed` date.
     ///
     pub fn is_done(&self) -> bool {
-        self.headers().is_some_and(|headers| match headers {
-            Headers { x: Some(_), .. }
-            | Headers {
-                date_completed: Some(_),
-                ..
-            } => true,
-            _ => false,
-        })
+        matches!(
+            self,
+            Self { x: Some(_), .. }
+                | Self {
+                    date_completed: Some(_),
+                    ..
+                }
+        )
     }
 
-    /// The line number of the todo.
-    ///
-    pub fn line(&self) -> u32 {
-        self.line
-    }
-
-    /// Returns an iterator over the tags in the todo's description.
-    ///
-    pub fn tags(&self) -> impl Iterator<Item = Tag> {
-        parser::tags(self.description())
-    }
-}
-
-impl<'a> Todo<'a> {
     /// Returns a clone of self with the description allocated on the heap.
     ///
     pub fn into_owned(self) -> Todo<'static> {
@@ -208,7 +182,10 @@ impl Debug for Todo<'_> {
 
         fmt.debug_struct("Todo")
             .field("line", &self.line)
-            .field("headers", &self.headers)
+            .field("x", &self.x)
+            .field("priority", &self.priority)
+            .field("date_completed", &self.date_completed)
+            .field("date_started", &self.date_started)
             .field("description", &self.description)
             .field("tags", &DebugTags { todo: self })
             .finish()
@@ -216,32 +193,24 @@ impl Debug for Todo<'_> {
 }
 
 #[cfg(feature = "serde")]
-impl Serialize for SerializeTags<'_> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(self.todo.tags())
-    }
-}
-
-#[cfg(feature = "serde")]
 impl Serialize for Todo<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut state = serializer.serialize_struct("Todo", 1)?;
-        let mut checkmark = None;
-        let mut priority = None;
-        let mut completed = None;
-        let mut started = None;
-
-        if let Some(headers) = self.headers() {
-            checkmark = headers.x.as_ref();
-            priority = headers.priority.as_ref();
-            completed = headers.date_completed.as_ref();
-            started = headers.date_started.as_ref();
+        struct SerializeTags<'a> {
+            todo: &'a Todo<'a>,
         }
 
-        state.serialize_field("checkmark", &checkmark)?;
-        state.serialize_field("priority", &priority)?;
-        state.serialize_field("completed", &completed)?;
-        state.serialize_field("started", &started)?;
+        impl Serialize for SerializeTags<'_> {
+            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                serializer.collect_seq(self.todo.tags())
+            }
+        }
+
+        let mut state = serializer.serialize_struct("Todo", 1)?;
+
+        state.serialize_field("x", &self.x)?;
+        state.serialize_field("priority", &self.priority)?;
+        state.serialize_field("date_completed", &self.date_completed)?;
+        state.serialize_field("date_started", &self.date_started)?;
         state.serialize_field("description", &self.description)?;
         state.serialize_field("tags", &SerializeTags { todo: &self })?;
 

@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, take};
-use nom::character::complete::{line_ending, one_of, space0};
+use nom::character::complete::{line_ending, one_of, space0, space1};
 use nom::combinator::{iterator, map, map_opt, map_res, opt, verify};
 use nom::sequence::{delimited, preceded, terminated};
 use nom::{IResult, Parser};
@@ -9,10 +9,16 @@ use nom_locate::position;
 use std::borrow::Cow;
 use std::str::{CharIndices, FromStr};
 
-use crate::todotxt::{Description, Headers, Located, Priority, Span, Tag, Todo};
+use crate::todotxt::{Description, Located, Priority, Span, Tag, Todo};
 
-pub type Error<'a> = nom::error::Error<Input<'a>>;
 pub type Input<'a> = nom_locate::LocatedSpan<&'a str>;
+
+type Error<'a> = nom::error::Error<Input<'a>>;
+type Headers = (
+    Option<Span>,
+    Option<Priority>,
+    Option<(Located<NaiveDate>, Option<Located<NaiveDate>>)>,
+);
 
 struct SplitWhitespace<'a> {
     iter: CharIndices<'a>,
@@ -23,8 +29,17 @@ struct SplitWhitespace<'a> {
 ///
 pub fn from_str(value: &str) -> impl Iterator<Item = Todo> {
     iterator(value.into(), delimited(eol, todo(), eol)).filter(|todo| {
-        // If a todo contains only whitespace, exclude it.
-        todo.headers.is_some() || !todo.description.text().trim().is_empty()
+        !todo.description.text().trim().is_empty()
+            || !matches!(
+                todo,
+                Todo {
+                    x: None,
+                    priority: None,
+                    date_completed: None,
+                    date_started: None,
+                    ..
+                }
+            )
     })
 }
 
@@ -66,15 +81,29 @@ pub fn todo<'a>() -> impl Parser<Input<'a>, Output = Todo<'a>, Error = Error<'a>
     alt((
         map(
             (position, preceded(space0, headers()), description()),
-            |(pos, headers, description)| Todo {
-                line: pos.location_line(),
-                headers: Some(headers),
-                description,
+            |(pos, headers, description)| {
+                let (x, priority, dates) = headers;
+                let (date_completed, date_started) = match dates {
+                    Some((first, Some(second))) => (Some(first), Some(second)),
+                    Some((first, None)) => (None, Some(first)),
+                    None => (None, None),
+                };
+                Todo {
+                    line: pos.location_line(),
+                    x,
+                    priority,
+                    date_completed,
+                    date_started,
+                    description,
+                }
             },
         ),
         map((position, description()), |(pos, description)| Todo {
             line: pos.location_line(),
-            headers: None,
+            x: None,
+            priority: None,
+            date_completed: None,
+            date_started: None,
             description,
         }),
     ))
@@ -82,51 +111,39 @@ pub fn todo<'a>() -> impl Parser<Input<'a>, Output = Todo<'a>, Error = Error<'a>
 
 fn description<'a>() -> impl Parser<Input<'a>, Output = Description<'a>, Error = Error<'a>> {
     map(is_not("\r\n"), |output: Input<'a>| {
+        let text = output.fragment().trim_end();
+        let offset = text.len() - text.trim_start().len();
+        let span_start = output.get_utf8_column() - 1 + offset;
+
         Description(Located {
-            data: Cow::Borrowed(*output.fragment()),
-            span: Span::locate(&output, output.len()),
+            data: Cow::Borrowed(&text[offset..]),
+            span: Span::new(span_start, span_start + text.len()),
         })
     })
 }
 
 fn headers<'a>() -> impl Parser<Input<'a>, Output = Headers, Error = Error<'a>> {
-    map(
-        verify(
-            (
-                opt(map(terminated(tag("x"), tag(" ")), |at| {
-                    Span::locate(&at, 1)
-                })),
-                opt(map(
-                    (
-                        map(position, |at| Span::locate(&at, 3)),
-                        terminated(
-                            delimited(tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
-                            tag(" "),
-                        ),
+    verify(
+        (
+            opt(map(terminated(tag("x"), space1), |pos| {
+                Span::locate(&pos, 1)
+            })),
+            opt(map(
+                (
+                    position,
+                    terminated(
+                        delimited(tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
+                        space1,
                     ),
-                    |(span, data)| Priority(Located { data, span }),
-                )),
-                opt((ymd(), opt(ymd()))),
-            ),
-            |headers| match headers {
-                (Some(_), _, _) | (_, Some(_), _) | (_, _, Some(_)) => true,
-                _ => false,
-            },
+                ),
+                |(pos, data)| {
+                    let span = Span::locate(&pos, 3);
+                    Priority(Located { data, span })
+                },
+            )),
+            opt((ymd(), opt(ymd()))),
         ),
-        |(x, priority, dates)| {
-            let (date_completed, date_started) = match dates {
-                Some((first, Some(second))) => (Some(first), Some(second)),
-                Some((first, None)) => (None, Some(first)),
-                None => (None, None),
-            };
-
-            Headers {
-                x,
-                priority,
-                date_completed,
-                date_started,
-            }
-        },
+        |output| !matches!(output, (None, None, None)),
     )
 }
 
@@ -155,15 +172,12 @@ fn ymd<'a>() -> impl Parser<Input<'a>, Output = Located<NaiveDate>, Error = Erro
         parse_to(take(2usize)),
     );
 
-    map_opt(
-        (position, terminated(triple, tag(" "))),
-        |(at, (y, m, d))| {
-            Some(Located {
-                data: NaiveDate::from_ymd_opt(y, m, d)?,
-                span: Span::locate(&at, 10),
-            })
-        },
-    )
+    map_opt((position, terminated(triple, space1)), |(at, (y, m, d))| {
+        Some(Located {
+            data: NaiveDate::from_ymd_opt(y, m, d)?,
+            span: Span::locate(&at, 10),
+        })
+    })
 }
 
 impl<'a> SplitWhitespace<'a> {
