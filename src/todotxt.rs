@@ -7,6 +7,12 @@ use serde::{Serialize, Serializer};
 
 use crate::parser::{self, Input};
 
+pub(crate) type Headers = (
+    Option<Span>,
+    Option<Priority>,
+    Option<(Located<NaiveDate>, Option<Located<NaiveDate>>)>,
+);
+
 #[cfg_attr(
     feature = "serde",
     derive(Serialize),
@@ -125,6 +131,14 @@ impl Todo<'_> {
     pub fn tags(&self) -> impl Iterator<Item = Tag> {
         let description = &self.description;
         parser::tags(description.span, description.data.as_ref())
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.description.data.trim().is_empty()
+            && self.checkmark.is_none()
+            && self.priority.is_none()
+            && self.completed.is_none()
+            && self.started.is_none()
     }
 }
 
