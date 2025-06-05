@@ -7,54 +7,56 @@ use serde::{Serialize, Serializer};
 
 use crate::parser::{self, Input};
 
-pub(crate) type Headers = (
-    Option<Span>,
-    Option<Priority>,
-    Option<(Located<NaiveDate>, Option<Located<NaiveDate>>)>,
-);
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Description<'a>(pub(crate) Located<Cow<'a, str>>);
+
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Priority(pub(crate) Located<char>);
 
 #[cfg_attr(
     feature = "serde",
     derive(Serialize),
     serde(tag = "type", rename_all = "lowercase")
 )]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Tag<'a> {
     Context(Located<&'a str>),
     Project(Located<&'a str>),
     Named(Located<(&'a str, &'a str)>),
 }
 
-/// TODO: docs
-///
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Priority(pub(crate) Located<char>);
-
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Located<T> {
-    pub data: T,
-    pub span: Span,
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct Headers {
+    pub x: Option<Span>,
+    pub priority: Option<Priority>,
+    pub date_completed: Option<Located<NaiveDate>>,
+    pub date_started: Option<Located<NaiveDate>>,
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Located<T> {
+    pub(crate) data: T,
+    pub(crate) span: Span,
+}
+
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub struct Span {
-    line: u32,
-    offset: (usize, usize),
+    start: usize,
+    end: usize,
 }
 
 /// A task from a todo list.
 ///
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct Todo<'a> {
-    pub checkmark: Option<Span>,
-    pub priority: Option<Priority>,
-    pub completed: Option<Located<NaiveDate>>,
-    pub started: Option<Located<NaiveDate>>,
-    pub description: Located<Cow<'a, str>>,
+    pub(crate) line: u32,
+    pub(crate) headers: Option<Headers>,
+    pub(crate) description: Description<'a>,
 }
 
 #[cfg(feature = "serde")]
@@ -62,11 +64,47 @@ struct SerializeTags<'a> {
     todo: &'a Todo<'a>,
 }
 
+impl Description<'_> {
+    /// A reference to the description text.
+    ///
+    pub fn text(&self) -> &str {
+        self.0.data.as_ref()
+    }
+
+    pub fn span(&self) -> &Span {
+        self.0.span()
+    }
+
+    /// Returns an owned string containing the description text.
+    ///
+    pub fn into_string(self) -> String {
+        self.0.data.into_owned()
+    }
+}
+
+impl<T> Located<T> {
+    /// A reference to value of the associated item.
+    ///
+    pub fn data(&self) -> &T {
+        &self.data
+    }
+
+    /// The location of the associated item.
+    ///
+    pub fn span(&self) -> &Span {
+        &self.span
+    }
+}
+
 impl Priority {
     /// Returns the `char` that is used for prioritization and ordering.
     ///
     pub fn rank(&self) -> char {
         self.0.data
+    }
+
+    pub fn span(&self) -> &Span {
+        self.0.span()
     }
 }
 
@@ -79,66 +117,61 @@ impl PartialOrd for Priority {
 }
 
 impl Span {
-    /// The line number of the associated item.
-    ///
-    pub fn line(&self) -> u32 {
-        self.line
-    }
-
-    /// The byte offset of the first character of the associated item.
-    ///
     pub fn start(&self) -> usize {
-        self.offset.0
+        self.start
     }
 
-    /// The byte offset of the last character of the associated item.
-    ///
     pub fn end(&self) -> usize {
-        self.offset.1
+        self.end
     }
 }
 
 impl Span {
-    pub(crate) fn new(line: u32, offset: (usize, usize)) -> Self {
-        Self { line, offset }
+    pub(crate) fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
     }
 
     pub(crate) fn locate(at: &Input, len: usize) -> Self {
         let start = at.get_utf8_column() - 1;
-
-        Self {
-            line: at.location_line(),
-            offset: (start, start + len),
-        }
+        let end = start + len;
+        Self { start, end }
     }
 }
 
 impl Todo<'_> {
     /// Returns a reference to the value of the todo's description.
     ///
-    pub fn description(&self) -> &str {
-        self.description.data.as_ref()
+    pub fn description(&self) -> &Description {
+        &self.description
+    }
+
+    pub fn headers(&self) -> Option<&Headers> {
+        self.headers.as_ref()
     }
 
     /// True if the todo starts with a lowercase "x" or has a `completed` date.
     ///
     pub fn is_done(&self) -> bool {
-        self.checkmark.is_some() || self.completed.is_some()
+        self.headers().is_some_and(|headers| match headers {
+            Headers { x: Some(_), .. }
+            | Headers {
+                date_completed: Some(_),
+                ..
+            } => true,
+            _ => false,
+        })
+    }
+
+    /// The line number of the todo.
+    ///
+    pub fn line(&self) -> u32 {
+        self.line
     }
 
     /// Returns an iterator over the tags in the todo's description.
     ///
     pub fn tags(&self) -> impl Iterator<Item = Tag> {
-        let description = &self.description;
-        parser::tags(description.span, description.data.as_ref())
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.description.data.trim().is_empty()
-            && self.checkmark.is_none()
-            && self.priority.is_none()
-            && self.completed.is_none()
-            && self.started.is_none()
+        parser::tags(self.description())
     }
 }
 
@@ -146,13 +179,13 @@ impl<'a> Todo<'a> {
     /// Returns a clone of self with the description allocated on the heap.
     ///
     pub fn into_owned(self) -> Todo<'static> {
-        let description = self.description;
+        let Description(Located { data, span }) = self.description;
 
         Todo {
-            description: Located {
-                data: Cow::Owned(description.data.into_owned()),
-                span: description.span,
-            },
+            description: Description(Located {
+                data: Cow::Owned(data.into_owned()),
+                span,
+            }),
             ..self
         }
     }
@@ -171,11 +204,22 @@ impl Serialize for Todo<'_> {
         use serde::ser::SerializeStruct;
 
         let mut state = serializer.serialize_struct("Todo", 1)?;
+        let mut checkmark = None;
+        let mut priority = None;
+        let mut completed = None;
+        let mut started = None;
 
-        state.serialize_field("checkmark", &self.checkmark)?;
-        state.serialize_field("priority", &self.priority)?;
-        state.serialize_field("completed", &self.completed)?;
-        state.serialize_field("started", &self.started)?;
+        if let Some(headers) = self.headers() {
+            checkmark = headers.x.as_ref();
+            priority = headers.priority.as_ref();
+            completed = headers.date_completed.as_ref();
+            started = headers.date_started.as_ref();
+        }
+
+        state.serialize_field("checkmark", &checkmark)?;
+        state.serialize_field("priority", &priority)?;
+        state.serialize_field("completed", &completed)?;
+        state.serialize_field("started", &started)?;
         state.serialize_field("description", &self.description)?;
         state.serialize_field("tags", &SerializeTags { todo: &self })?;
 
@@ -191,12 +235,12 @@ mod tests {
     fn test_priority_order() {
         let a = Priority(Located {
             data: 'A',
-            span: Span::new(0, (0, 0)),
+            span: Span::new(0, 0),
         });
 
         let b = Priority(Located {
             data: 'B',
-            span: Span::new(0, (0, 0)),
+            span: Span::new(0, 0),
         });
 
         assert!(
