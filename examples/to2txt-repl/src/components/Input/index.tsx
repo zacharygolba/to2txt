@@ -15,7 +15,7 @@ export default function Input(props: InputProps): JSX.Element {
     <textarea
       autoCapitalize="none"
       spellCheck={false}
-      placeholder={`(A) feed the tomato plants @garden +home`}
+      placeholder={`(A) feed the tomato plants +garden @home`}
       className={clsx(
         "outline-none resize-none placeholder:italic",
         props.className,
