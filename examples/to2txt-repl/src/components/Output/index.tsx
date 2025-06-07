@@ -6,12 +6,12 @@ export interface OutputProps {
   value?: string;
 }
 
-export function Output(props: OutputProps): JSX.Element {
+export default function Output(props: OutputProps): JSX.Element {
   const [parser, setParser] = useState<{ parse(input: string): string }>();
   const [error, setError] = useState();
 
   useEffect(() => {
-    import("../../wasm/pkg").then(setParser, setError);
+    import("../../../wasm/pkg").then(setParser, setError);
   }, []);
 
   if (error) {
@@ -19,13 +19,8 @@ export function Output(props: OutputProps): JSX.Element {
   }
 
   return (
-    <code
-      className={clsx(
-        "text-white/50 whitespace-pre-wrap leading-0",
-        props.className,
-      )}
-    >
+    <div className={clsx("text-white/50 whitespace-pre-wrap", props.className)}>
       {parser && props.value && parser.parse(props.value)}
-    </code>
+    </div>
   );
 }
