@@ -22,7 +22,7 @@ type Headers = (
 
 /// Parse a todo list from the provided `&str`.
 ///
-pub fn from_str(value: &str) -> impl Iterator<Item = Todo> {
+pub fn from_str(value: &str) -> impl Iterator<Item = Todo<'_>> {
     iterator(value.into(), delimited(eol, todo(), eol)).filter(|todo| {
         !todo.description.text().trim().is_empty()
             || !matches!(
