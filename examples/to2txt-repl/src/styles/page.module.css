@@ -1,3 +1,25 @@
+@reference "tailwindcss";
+
+.grid {
+  @apply m-2 grid grid-rows-2 rounded;
+  background: var(--color-midnight);
+  height: calc(100% - var(--spacing) * 4);
+
+  @media (width > 48rem) {
+    @apply grid-cols-2 grid-rows-1;
+  }
+}
+
+.header {
+  @apply absolute top-0 right-4.5 left-4.5 h-16 text-2xl select-none;
+  background: var(--color-midnight);
+  line-height: 4rem;
+}
+
+.input {
+  @apply min-h-full w-full px-4.5 pt-16 pb-4 text-sm text-gray-200 leading-relaxed;
+}
+
 .pane {
   @apply h-full;
 
@@ -11,7 +33,30 @@
   }
 }
 
-.inputContainer {
-  @apply overflow-hidden;
-  height: calc(100% - 4rem);
+.viewport {
+  @apply absolute inset-0;
+  animation: Gradient 42s ease infinite;
+  background: linear-gradient(
+    -45deg,
+    #ee7752,
+    #e73c7e,
+    #9b59b6,
+    #23a6d5,
+    #1abc9c,
+    #23d5ab,
+    #f39c12
+  );
+  background-size: 400% 400%;
+}
+
+@keyframes Gradient {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
 }

@@ -10,17 +10,17 @@ export interface InputProps {
   onChange?(value: string): void;
 }
 
-export function Input(props: InputProps): JSX.Element {
+export default function Input(props: InputProps): JSX.Element {
   return (
     <textarea
       autoCapitalize="none"
       spellCheck={false}
       placeholder={`(A) feed the tomato plants @garden +home`}
       className={clsx(
-        "bg-transparent border-none text-base leading-6 outline-none resize-none font-sans placeholder:italic",
+        "outline-none resize-none placeholder:italic",
         props.className,
       )}
-      onChange={(e) => props.onChange?.(e.currentTarget.value)}
+      onInput={({ currentTarget }) => props.onChange?.(currentTarget.value)}
       value={props.value}
     />
   );
