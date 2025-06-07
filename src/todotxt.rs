@@ -119,6 +119,15 @@ impl Span {
     pub fn end(&self) -> usize {
         self.end
     }
+
+    pub(crate) fn locate_from(input: &Input, len: usize, offset: usize) -> Self {
+        let Self { start, end } = Self::locate(input, len);
+
+        Self {
+            start: start + offset,
+            end: end + offset,
+        }
+    }
 }
 
 impl Span {
@@ -136,7 +145,7 @@ impl Span {
 impl Todo<'_> {
     /// Returns an iterator over the tags in the todo's description.
     ///
-    pub fn tags(&self) -> impl Iterator<Item = Tag> {
+    pub fn tags(&self) -> impl Iterator<Item = Tag<'_>> {
         parser::tags(&self.description)
     }
 

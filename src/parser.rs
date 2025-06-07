@@ -1,13 +1,13 @@
 use chrono::NaiveDate;
 use nom::branch::alt;
-use nom::bytes::complete::{is_not, tag, take};
+use nom::bytes::complete::{is_not, tag, take, take_while1};
 use nom::character::complete::{line_ending, one_of, space0, space1};
-use nom::combinator::{iterator, map, map_opt, map_res, opt, verify};
-use nom::sequence::{delimited, preceded, terminated};
+use nom::combinator::{iterator, map, map_opt, map_parser, map_res, opt, verify};
+use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use nom::{IResult, Parser};
 use nom_locate::position;
 use std::borrow::Cow;
-use std::str::{CharIndices, FromStr};
+use std::str::FromStr;
 
 use crate::todotxt::{Description, Located, Priority, Span, Tag, Todo};
 
@@ -20,14 +20,9 @@ type Headers = (
     Option<(Located<NaiveDate>, Option<Located<NaiveDate>>)>,
 );
 
-struct SplitWhitespace<'a> {
-    iter: CharIndices<'a>,
-    len: usize,
-}
-
 /// Parse a todo list from the provided `&str`.
 ///
-pub fn from_str(value: &str) -> impl Iterator<Item = Todo> {
+pub fn from_str(value: &str) -> impl Iterator<Item = Todo<'_>> {
     iterator(value.into(), delimited(eol, todo(), eol)).filter(|todo| {
         !todo.description.text().trim().is_empty()
             || !matches!(
@@ -44,35 +39,36 @@ pub fn from_str(value: &str) -> impl Iterator<Item = Todo> {
 }
 
 pub fn tags<'a>(description: &'a Description) -> impl Iterator<Item = Tag<'a>> {
-    let offset = description.span().start();
-    let text = description.text();
+    let typed = |ctor: fn(Located<&'a str>) -> Tag<'a>| {
+        move |(pos, output): (Input<'a>, Input<'a>)| {
+            let len = output.fragment().len() + 1;
+            let from = description.span().start();
 
-    SplitWhitespace::new(text).filter_map(move |(start, end)| {
-        let token = &text[start..end];
-        let span = Span::new(start + offset, end + offset);
-
-        if token.starts_with('@') && token.len() > 1 {
-            return Some(Tag::Context(Located {
-                data: &token[1..],
-                span,
-            }));
+            ctor(Located {
+                data: output.into_fragment(),
+                span: Span::locate_from(&pos, len, from),
+            })
         }
+    };
 
-        if token.starts_with('+') && token.len() > 1 {
-            return Some(Tag::Project(Located {
-                data: &token[1..],
-                span,
-            }));
-        }
+    let parse1 = map_parser(
+        preceded(space0, word()),
+        opt(alt((
+            map((tag("@"), word()), typed(Tag::Context)),
+            map((tag("+"), word()), typed(Tag::Project)),
+            map(separated_pair(word(), tag(":"), word()), |(name, value)| {
+                let len = name.fragment().len() + value.fragment().len() + 1;
+                let from = description.span().start();
 
-        token.split_once(':').and_then(|pair| {
-            if !pair.0.is_empty() && !pair.1.is_empty() {
-                Some(Tag::Named(Located { data: pair, span }))
-            } else {
-                None
-            }
-        })
-    })
+                Tag::Named(Located {
+                    data: (name.into_fragment(), value.into_fragment()),
+                    span: Span::locate_from(&name, len, from),
+                })
+            }),
+        ))),
+    );
+
+    iterator(description.text().into(), parse1).flatten()
 }
 
 /// Returns a parser that parses a single task on a todo list.
@@ -165,6 +161,10 @@ where
     map_res(parser, |output| output.fragment().parse())
 }
 
+fn word<'a>() -> impl Parser<Input<'a>, Output = Input<'a>, Error = Error<'a>> {
+    take_while1(|c: char| !c.is_whitespace())
+}
+
 fn ymd<'a>() -> impl Parser<Input<'a>, Output = Located<NaiveDate>, Error = Error<'a>> {
     let triple = (
         terminated(parse_to(take(4usize)), tag("-")),
@@ -180,26 +180,19 @@ fn ymd<'a>() -> impl Parser<Input<'a>, Output = Located<NaiveDate>, Error = Erro
     })
 }
 
-impl<'a> SplitWhitespace<'a> {
-    fn new(value: &'a str) -> Self {
-        Self {
-            iter: value.char_indices(),
-            len: value.len(),
-        }
-    }
-}
+#[cfg(test)]
+mod tests {
+    use crate::todotxt::{Description, Located, Span};
+    use std::borrow::Cow;
 
-impl<'a> Iterator for SplitWhitespace<'a> {
-    type Item = (usize, usize);
+    #[test]
+    fn test_parse_tags() {
+        let text = "feed the tomato plants @home +garden";
+        let desc = Description(Located {
+            data: Cow::Borrowed(text),
+            span: Span::new(3, text.len() + 3),
+        });
 
-    fn next(&mut self) -> Option<Self::Item> {
-        let iter = &mut self.iter;
-
-        let start = iter.find_map(|(i, c)| if c.is_whitespace() { None } else { Some(i) })?;
-        let end = iter
-            .find_map(|(i, c)| if c.is_whitespace() { Some(i) } else { None })
-            .unwrap_or(self.len);
-
-        Some((start, end))
+        assert_eq!(super::tags(&desc).collect::<Vec<_>>().len(), 2);
     }
 }
