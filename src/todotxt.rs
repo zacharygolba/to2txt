@@ -145,7 +145,7 @@ impl Span {
 impl Todo<'_> {
     /// Returns an iterator over the tags in the todo's description.
     ///
-    pub fn tags(&self) -> impl Iterator<Item = Tag> {
+    pub fn tags(&self) -> impl Iterator<Item = Tag<'_>> {
         parser::tags(&self.description)
     }
 
