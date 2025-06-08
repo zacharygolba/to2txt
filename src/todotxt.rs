@@ -8,7 +8,7 @@ use serde::ser::SerializeStruct;
 #[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 
-use crate::parser::{self, Input};
+use crate::parser::{self, Located, Span};
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Debug, PartialEq)]
@@ -28,20 +28,6 @@ pub enum Tag<'a> {
     Context(Located<&'a str>),
     Project(Located<&'a str>),
     Named(Located<(&'a str, &'a str)>),
-}
-
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Debug, PartialEq)]
-pub struct Located<T> {
-    pub(crate) data: T,
-    pub(crate) span: Span,
-}
-
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
-pub struct Span {
-    start: usize,
-    end: usize,
 }
 
 /// A task from a todo list.
@@ -77,20 +63,6 @@ impl Description<'_> {
     }
 }
 
-impl<T> Located<T> {
-    /// A reference to value of the associated item.
-    ///
-    pub fn data(&self) -> &T {
-        &self.data
-    }
-
-    /// The location of the associated item.
-    ///
-    pub fn span(&self) -> &Span {
-        &self.span
-    }
-}
-
 impl Priority {
     /// Returns the `char` that is used for prioritization and ordering.
     ///
@@ -111,42 +83,11 @@ impl PartialOrd for Priority {
     }
 }
 
-impl Span {
-    pub fn start(&self) -> usize {
-        self.start
-    }
-
-    pub fn end(&self) -> usize {
-        self.end
-    }
-
-    pub(crate) fn locate_from(input: &Input, len: usize, offset: usize) -> Self {
-        let Self { start, end } = Self::locate(input, len);
-
-        Self {
-            start: start + offset,
-            end: end + offset,
-        }
-    }
-}
-
-impl Span {
-    pub(crate) fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
-    }
-
-    pub(crate) fn locate(input: &Input, len: usize) -> Self {
-        let start = input.get_utf8_column() - 1;
-        let end = start + len;
-        Self { start, end }
-    }
-}
-
 impl Todo<'_> {
     /// Returns an iterator over the tags in the todo's description.
     ///
     pub fn tags(&self) -> impl Iterator<Item = Tag<'_>> {
-        parser::tags(&self.description)
+        parser::parse_tags(&self.description)
     }
 
     /// True if the todo starts with a lowercase "x" or has a `completed` date.
