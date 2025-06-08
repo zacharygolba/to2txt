@@ -7,7 +7,6 @@ use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use nom::{IResult, Parser};
 use nom_locate::position;
 use std::borrow::Cow;
-use std::fmt::Debug;
 use std::str::FromStr;
 
 #[cfg(feature = "serde")]
