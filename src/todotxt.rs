@@ -87,7 +87,7 @@ impl Todo<'_> {
     /// Returns an iterator over the tags in the todo's description.
     ///
     pub fn tags(&self) -> impl Iterator<Item = Tag<'_>> {
-        parser::tags(&self.description)
+        parser::parse_tags(&self.description)
     }
 
     /// True if the todo starts with a lowercase "x" or has a `completed` date.

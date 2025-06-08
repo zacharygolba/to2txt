@@ -7,6 +7,7 @@ use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use nom::{IResult, Parser};
 use nom_locate::position;
 use std::borrow::Cow;
+use std::fmt::Debug;
 use std::str::FromStr;
 
 #[cfg(feature = "serde")]
@@ -42,7 +43,7 @@ pub fn from_str(input: &str) -> impl Iterator<Item = Todo<'_>> {
     iterator(input.into(), delimited(eol, parse1, eol)).flatten()
 }
 
-pub fn tags<'a>(description: &'a Description) -> impl Iterator<Item = Tag<'a>> {
+pub fn parse_tags<'a>(description: &'a Description) -> impl Iterator<Item = Tag<'a>> {
     let typed = |ctor: fn(Located<&'a str>) -> Tag<'a>| {
         move |(pos, output): (Input<'a>, Input<'a>)| {
             let len = output.fragment().len() + 1;
@@ -60,25 +61,25 @@ pub fn tags<'a>(description: &'a Description) -> impl Iterator<Item = Tag<'a>> {
         opt(alt((
             map((tag("@"), word()), typed(Tag::Context)),
             map((tag("+"), word()), typed(Tag::Project)),
-            map(separated_pair(word(), tag(":"), word()), |(name, value)| {
-                let len = name.fragment().len() + value.fragment().len() + 1;
-                let from = description.span().start();
+            map(
+                separated_pair(is_not(" :"), tag(":"), word()),
+                |(name, value)| {
+                    let len = name.fragment().len() + value.fragment().len() + 1;
+                    let from = description.span().start();
 
-                Tag::Named(Located {
-                    data: (name.into_fragment(), value.into_fragment()),
-                    span: Span::locate_from(&name, len, from),
-                })
-            }),
+                    Tag::Named(Located {
+                        data: (name.into_fragment(), value.into_fragment()),
+                        span: Span::locate_from(&name, len, from),
+                    })
+                },
+            ),
         ))),
     );
 
     iterator(description.text().into(), parse1).flatten()
 }
 
-/// Returns a parser that parses a single task on a todo list.
-///
 fn todo<'a>() -> impl Parser<Input<'a>, Output = Todo<'a>, Error = Error<'a>> {
-    let uppercase = one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
     map(
         (
             map(position, |pos: Input<'a>| pos.location_line()),
@@ -86,7 +87,13 @@ fn todo<'a>() -> impl Parser<Input<'a>, Output = Todo<'a>, Error = Error<'a>> {
                 Span::locate(&pos, 1)
             })),
             opt(map(
-                terminated((position, delimited(tag("("), uppercase, tag(")"))), space1),
+                terminated(
+                    (
+                        position,
+                        delimited(tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
+                    ),
+                    space1,
+                ),
                 |(pos, data)| {
                     let span = Span::locate(&pos, 3);
                     Priority(Located { data, span })
@@ -158,12 +165,15 @@ fn ymd<'a>() -> impl Parser<Input<'a>, Output = Located<NaiveDate>, Error = Erro
         parse_to(take(2usize)),
     );
 
-    map_opt((position, terminated(triple, space1)), |(at, (y, m, d))| {
-        Some(Located {
-            data: NaiveDate::from_ymd_opt(y, m, d)?,
-            span: Span::locate(&at, 10),
-        })
-    })
+    map_opt(
+        (position, terminated(triple, space1)),
+        |(pos, (y, m, d))| {
+            Some(Located {
+                data: NaiveDate::from_ymd_opt(y, m, d)?,
+                span: Span::locate(&pos, 10),
+            })
+        },
+    )
 }
 
 impl<T> Located<T> {
@@ -199,6 +209,7 @@ impl Span {
     fn locate(input: &Input, len: usize) -> Self {
         let start = input.get_utf8_column() - 1;
         let end = start + len;
+
         Self { start, end }
     }
 
@@ -221,12 +232,12 @@ mod tests {
 
     #[test]
     fn test_parse_tags() {
-        let text = "feed the tomato plants @home +garden";
+        let text = "feed the tomato plants @home +garden due:2025-06-10";
         let desc = Description(Located {
             data: Cow::Borrowed(text),
             span: Span::new(3, text.len() + 3),
         });
 
-        assert_eq!(super::tags(&desc).collect::<Vec<_>>().len(), 2);
+        assert_eq!(super::parse_tags(&desc).collect::<Vec<_>>().len(), 3);
     }
 }
