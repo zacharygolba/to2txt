@@ -7,6 +7,7 @@ use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use nom::{IResult, Parser};
 use nom_locate::position;
 use std::borrow::Cow;
+use std::fmt::{self, Debug, Formatter};
 use std::str::FromStr;
 
 #[cfg(feature = "serde")]
@@ -20,16 +21,13 @@ type Input<'a> = nom_locate::LocatedSpan<&'a str>;
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Located<T> {
-    pub(crate) data: T,
     pub(crate) span: Span,
+    pub(crate) value: T,
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
-pub struct Span {
-    start: usize,
-    end: usize,
-}
+#[derive(Clone, PartialEq, PartialOrd)]
+pub struct Span(usize, usize);
 
 /// Parse a todo list from the provided `&str`.
 ///
@@ -49,7 +47,7 @@ pub fn parse_tags<'a>(description: &'a Description) -> impl Iterator<Item = Tag<
             let from = description.span().start();
 
             ctor(Located {
-                data: output.into_fragment(),
+                value: output.into_fragment(),
                 span: Span::locate_from(&pos, len, from),
             })
         }
@@ -67,7 +65,7 @@ pub fn parse_tags<'a>(description: &'a Description) -> impl Iterator<Item = Tag<
                     let from = description.span().start();
 
                     Tag::Named(Located {
-                        data: (name.into_fragment(), value.into_fragment()),
+                        value: (name.into_fragment(), value.into_fragment()),
                         span: Span::locate_from(&name, len, from),
                     })
                 },
@@ -75,42 +73,41 @@ pub fn parse_tags<'a>(description: &'a Description) -> impl Iterator<Item = Tag<
         ))),
     );
 
-    iterator(description.text().into(), parse1).flatten()
+    iterator(description.value().into(), parse1).flatten()
 }
 
 fn todo<'a>() -> impl Parser<Input<'a>, Output = Todo<'a>, Error = Error<'a>> {
+    let priority = (
+        position,
+        terminated(
+            delimited(tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
+            space1,
+        ),
+    );
+
     map(
         (
             map(position, |pos: Input<'a>| pos.location_line()),
             opt(map(terminated(tag("x"), space1), |pos| {
                 Span::locate(&pos, 1)
             })),
-            opt(map(
-                terminated(
-                    (
-                        position,
-                        delimited(tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
-                    ),
-                    space1,
-                ),
-                |(pos, data)| {
-                    let span = Span::locate(&pos, 3);
-                    Priority(Located { data, span })
-                },
-            )),
+            opt(map(priority, |(pos, data)| {
+                let span = Span::locate(&pos, 3);
+                Priority(Located { value: data, span })
+            })),
             opt((ymd(), opt(ymd()))),
             alt((
                 map(preceded(space0, is_not("\r\n")), |output: Input<'a>| {
-                    let data = output.into_fragment().trim_end();
+                    let data = output.fragment().trim_end();
 
                     Description(Located {
-                        data: Cow::Borrowed(data),
+                        value: Cow::Borrowed(data),
                         span: Span::locate(&output, data.len()),
                     })
                 }),
                 map(eof, |pos| {
                     Description(Located {
-                        data: Cow::Borrowed(""),
+                        value: Cow::Borrowed(""),
                         span: Span::locate(&pos, 0),
                     })
                 }),
@@ -168,7 +165,7 @@ fn ymd<'a>() -> impl Parser<Input<'a>, Output = Located<NaiveDate>, Error = Erro
         (position, terminated(triple, space1)),
         |(pos, (y, m, d))| {
             Some(Located {
-                data: NaiveDate::from_ymd_opt(y, m, d)?,
+                value: NaiveDate::from_ymd_opt(y, m, d)?,
                 span: Span::locate(&pos, 10),
             })
         },
@@ -176,49 +173,49 @@ fn ymd<'a>() -> impl Parser<Input<'a>, Output = Located<NaiveDate>, Error = Erro
 }
 
 impl<T> Located<T> {
-    /// A reference to value of the associated item.
-    ///
-    pub fn data(&self) -> &T {
-        &self.data
-    }
-
     /// The location of the associated item.
     ///
     pub fn span(&self) -> &Span {
         &self.span
     }
+
+    /// A reference to value of the associated item.
+    ///
+    pub fn value(&self) -> &T {
+        &self.value
+    }
 }
 
 impl Span {
     pub fn start(&self) -> usize {
-        self.start
+        self.0
     }
 
     pub fn end(&self) -> usize {
-        self.end
+        self.1
     }
 }
 
 impl Span {
     #[cfg(test)]
     pub(crate) fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
+        Self(start, end)
     }
 
     fn locate(input: &Input, len: usize) -> Self {
         let start = input.get_utf8_column() - 1;
-        let end = start + len;
-
-        Self { start, end }
+        Self(start, start + len)
     }
 
     fn locate_from(input: &Input, len: usize, offset: usize) -> Self {
-        let span = Self::locate(input, len);
+        let Self(start, end) = Self::locate(input, len);
+        Self(start + offset, end + offset)
+    }
+}
 
-        Self {
-            start: span.start + offset,
-            end: span.end + offset,
-        }
+impl Debug for Span {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Span({}, {})", self.start(), self.end())
     }
 }
 
@@ -233,7 +230,7 @@ mod tests {
     fn test_parse_tags() {
         let text = "feed the tomato plants @home +garden due:2025-06-10";
         let desc = Description(Located {
-            data: Cow::Borrowed(text),
+            value: Cow::Borrowed(text),
             span: Span::new(3, text.len() + 3),
         });
 

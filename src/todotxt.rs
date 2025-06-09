@@ -44,53 +44,46 @@ pub struct Todo<'a> {
 }
 
 impl Description<'_> {
-    /// A reference to the description text.
-    ///
-    pub fn text(&self) -> &str {
-        self.0.data.as_ref()
-    }
-
     pub fn span(&self) -> &Span {
         self.0.span()
     }
-}
 
-impl Description<'_> {
+    /// A reference to the description text.
+    ///
+    pub fn value(&self) -> &str {
+        self.0.value.as_ref()
+    }
+
     /// Returns an owned string containing the description text.
     ///
     pub fn into_string(self) -> String {
-        self.0.data.into_owned()
+        self.0.value.into_owned()
     }
 }
 
 impl Priority {
-    /// Returns the `char` that is used for prioritization and ordering.
-    ///
-    pub fn rank(&self) -> char {
-        self.0.data
-    }
-
     pub fn span(&self) -> &Span {
         self.0.span()
+    }
+
+    /// A reference to the ASCII uppercase character that is used for
+    /// priority-based ordering.
+    ///
+    pub fn value(&self) -> &char {
+        &self.0.value
     }
 }
 
 impl PartialOrd for Priority {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.rank()
-            .partial_cmp(&other.rank())
+        self.value()
+            .partial_cmp(other.value())
             .map(Ordering::reverse)
     }
 }
 
 impl Todo<'_> {
-    /// Returns an iterator over the tags in the todo's description.
-    ///
-    pub fn tags(&self) -> impl Iterator<Item = Tag<'_>> {
-        parser::parse_tags(&self.description)
-    }
-
-    /// True if the todo starts with a lowercase "x" or has a `completed` date.
+    /// True if the todo starts with a lowercase "x" or has a `date_completed`.
     ///
     pub fn is_done(&self) -> bool {
         matches!(
@@ -103,14 +96,20 @@ impl Todo<'_> {
         )
     }
 
+    /// Returns an iterator over the tags in the todo's description.
+    ///
+    pub fn tags(&self) -> impl Iterator<Item = Tag<'_>> {
+        parser::parse_tags(&self.description)
+    }
+
     /// Returns a clone of self with the description allocated on the heap.
     ///
     pub fn into_owned(self) -> Todo<'static> {
-        let Description(Located { data, span }) = self.description;
+        let Description(Located { value: data, span }) = self.description;
 
         Todo {
             description: Description(Located {
-                data: Cow::Owned(data.into_owned()),
+                value: Cow::Owned(data.into_owned()),
                 span,
             }),
             ..self
@@ -175,12 +174,12 @@ mod tests {
     #[test]
     fn test_priority_order() {
         let a = Priority(Located {
-            data: 'A',
+            value: 'A',
             span: Span::new(0, 0),
         });
 
         let b = Priority(Located {
-            data: 'B',
+            value: 'B',
             span: Span::new(0, 0),
         });
 
