@@ -105,11 +105,11 @@ impl Todo<'_> {
     /// Returns a clone of self with the description allocated on the heap.
     ///
     pub fn into_owned(self) -> Todo<'static> {
-        let Description(Located { value: data, span }) = self.description;
+        let Description(Located { value, span }) = self.description;
 
         Todo {
             description: Description(Located {
-                value: Cow::Owned(data.into_owned()),
+                value: Cow::Owned(value.into_owned()),
                 span,
             }),
             ..self
