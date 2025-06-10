@@ -114,33 +114,33 @@ impl Task<'_> {
     }
 
     pub fn mark_complete(&mut self) {
-        let x = &mut self.x;
-        let mut successive = (
-            self.priority.as_mut(),
-            self.completed.as_mut(),
-            self.started.as_mut(),
-            &mut self.description,
+        set_opt_task_field(
+            (),
+            (
+                &mut self.priority,
+                &mut self.completed,
+                &mut self.started,
+                &mut self.description,
+            ),
+            &mut self.x,
+            Some('x'),
+            1,
         );
-
-        if x.is_some() {
-            *x = None;
-            successive.translate_r(2);
-        }
     }
 
     pub fn mark_incomplete(&mut self) {
-        let x = &mut self.x;
-        let mut successive = (
-            self.priority.as_mut(),
-            self.completed.as_mut(),
-            self.started.as_mut(),
-            &mut self.description,
+        set_opt_task_field(
+            (),
+            (
+                &mut self.priority,
+                &mut self.completed,
+                &mut self.started,
+                &mut self.description,
+            ),
+            &mut self.x,
+            None,
+            1,
         );
-
-        if x.is_some() {
-            *x = None;
-            successive.translate_l(2);
-        }
     }
 
     pub fn priority(&self) -> Option<&Located<Priority>> {
