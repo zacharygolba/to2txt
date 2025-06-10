@@ -1,5 +1,7 @@
+mod locate;
 mod parser;
-mod todotxt;
+mod task;
 
-pub use parser::{from_str, Located, Span};
-pub use todotxt::{Priority, Tag, Task};
+pub use locate::{Located, Span};
+pub use parser::from_str;
+pub use task::{Priority, Tag, Task};

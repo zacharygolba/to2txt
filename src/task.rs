@@ -10,7 +10,8 @@ use serde::ser::SerializeStruct;
 #[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 
-use crate::parser::{self, Located, Moveable, Span};
+use crate::locate::{Located, Span, Translate};
+use crate::parser::{self};
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -38,11 +39,44 @@ pub enum Tag<'a> {
 #[derive(Clone)]
 pub struct Task<'a> {
     pub(crate) line: u32,
-    pub(crate) x: Option<Span>,
+    pub(crate) x: Option<Located<char>>,
     pub(crate) priority: Option<Located<Priority>>,
     pub(crate) completed: Option<Located<NaiveDate>>,
     pub(crate) started: Option<Located<NaiveDate>>,
     pub(crate) description: Located<Cow<'a, str>>,
+}
+
+fn set_opt_task_field<A, S, T>(
+    antecedent: A,
+    mut successive: S,
+    field: &mut Option<Located<T>>,
+    value: Option<T>,
+    len: usize,
+) where
+    A: Translate,
+    S: Translate,
+{
+    match (field, value) {
+        (Some(existing), Some(next)) => {
+            existing.replace(next);
+        }
+        (option_mut @ None, Some(next)) => {
+            let gap = antecedent.abs_distance(&successive).unwrap_or(1);
+            let start = antecedent.origin().map_or(0, |span| span.end() + gap);
+            *option_mut = Some(Located::new(Span::new(start, start + len), next));
+
+            successive.translate_r(len + gap);
+        }
+        (option_mut @ Some(_), None) => {
+            let gap = antecedent.abs_distance(option_mut).unwrap_or(1);
+            *option_mut = None;
+
+            successive.translate_l(gap + len);
+        }
+        (None, None) => {
+            // noop
+        }
+    }
 }
 
 impl Display for Priority {
@@ -63,7 +97,7 @@ impl Task<'_> {
     }
 
     pub fn x(&self) -> Option<&Span> {
-        self.x.as_ref()
+        Some(self.x.as_ref()?.span())
     }
 
     /// True if the todo starts with a lowercase "x" or has a `completed` date.
@@ -79,85 +113,80 @@ impl Task<'_> {
         )
     }
 
-    pub fn mark_complete(&mut self) -> &mut Self {
-        if self.x.is_none() {
-            let len = 3;
+    pub fn mark_complete(&mut self) {
+        let x = &mut self.x;
+        let mut successive = (
+            self.priority.as_mut(),
+            self.completed.as_mut(),
+            self.started.as_mut(),
+            &mut self.description,
+        );
 
-            self.x = Some(Span::new_unchecked(0, 1));
-
-            self.priority.move_right(len);
-            self.completed.move_right(len);
-            self.started.move_right(len);
-            self.description.move_right(len);
+        if x.is_some() {
+            *x = None;
+            successive.translate_r(2);
         }
-
-        self
     }
 
-    pub fn mark_incomplete(&mut self) -> &mut Self {
-        if self.x.is_some() {
-            let len = 3;
+    pub fn mark_incomplete(&mut self) {
+        let x = &mut self.x;
+        let mut successive = (
+            self.priority.as_mut(),
+            self.completed.as_mut(),
+            self.started.as_mut(),
+            &mut self.description,
+        );
 
-            self.x = None;
-
-            self.completed.move_left(len);
-            self.started.move_left(len);
-            self.description.move_left(len);
+        if x.is_some() {
+            *x = None;
+            successive.translate_l(2);
         }
-
-        self
     }
 
     pub fn priority(&self) -> Option<&Located<Priority>> {
         self.priority.as_ref()
     }
 
-    pub fn set_priority(&mut self, priority: Option<Priority>) -> &mut Self {
-        let len = 3;
-
-        match (self.priority.as_mut(), priority) {
-            (Some(existing), Some(value)) => {
-                existing.replace(value);
-            }
-            (None, Some(value)) => {
-                let start = self.x().map_or(0, |span| span.start() + 1);
-                let span = Span::new_unchecked(start, start + len);
-
-                self.priority = Some(Located::new(span, value));
-
-                self.completed.move_right(len + 1);
-                self.started.move_right(len + 1);
-                self.description.move_right(len + 1);
-            }
-            (Some(_), None) => {
-                self.priority = None;
-
-                self.completed.move_left(len + 1);
-                self.started.move_left(len + 1);
-                self.description.move_left(len + 1);
-            }
-            (None, None) => {
-                // noop
-            }
-        }
-
-        self
+    pub fn set_priority(&mut self, value: Option<Priority>) {
+        set_opt_task_field(
+            &mut self.x,
+            (
+                &mut self.completed,
+                &mut self.started,
+                &mut self.description,
+            ),
+            &mut self.priority,
+            value,
+            3,
+        );
     }
 
     pub fn completed(&self) -> Option<&Located<NaiveDate>> {
         self.completed.as_ref()
     }
 
-    pub fn set_completed(&mut self, completed: Option<NaiveDate>) -> &mut Self {
-        todo!()
+    pub fn set_completed(&mut self, value: Option<NaiveDate>) {
+        set_opt_task_field(
+            (&mut self.x, &mut self.priority),
+            (&mut self.started, &mut self.description),
+            &mut self.completed,
+            value,
+            10,
+        );
     }
 
     pub fn started(&self) -> Option<&Located<NaiveDate>> {
         self.started.as_ref()
     }
 
-    pub fn set_started(&mut self, started: Option<NaiveDate>) -> &mut Self {
-        todo!()
+    pub fn set_started(&mut self, value: Option<NaiveDate>) {
+        set_opt_task_field(
+            (&mut self.x, &mut self.priority, &mut self.completed),
+            &mut self.description,
+            &mut self.started,
+            value,
+            10,
+        );
     }
 
     pub fn description(&self) -> Located<&str> {
@@ -167,6 +196,13 @@ impl Task<'_> {
             value: description.value.as_ref(),
             span: description.span.clone(),
         }
+    }
+
+    pub fn set_description(&mut self, value: String) {
+        let offset = self.description().span().start();
+        let span = Span::new(offset, offset + value.len());
+
+        self.description = Located::new(span, Cow::Owned(value));
     }
 
     /// Returns an iterator over the tags in the todo's description.

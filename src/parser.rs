@@ -1,40 +1,20 @@
 use chrono::NaiveDate;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, take, take_while1};
-use nom::character::complete::{line_ending, one_of, space0, space1};
+use nom::character::complete::{char, line_ending, one_of, space0, space1};
 use nom::combinator::{eof, iterator, map, map_opt, map_parser, map_res, opt, peek};
 use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use nom::{IResult, Parser};
 use nom_locate::position;
 use std::borrow::Cow;
-use std::cmp::Ordering;
-use std::fmt::{self, Debug, Formatter};
 use std::mem;
 use std::str::FromStr;
 
-#[cfg(feature = "serde")]
-use serde::Serialize;
-
-use crate::todotxt::{Priority, Tag, Task};
+use crate::locate::{Located, Span};
+use crate::task::{Priority, Tag, Task};
 
 type Error<'a> = nom::error::Error<Input<'a>>;
-type Input<'a> = nom_locate::LocatedSpan<&'a str>;
-
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, PartialEq, PartialOrd)]
-pub struct Span(usize, usize);
-
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Debug)]
-pub struct Located<T> {
-    pub(crate) value: T,
-    pub(crate) span: Span,
-}
-
-pub trait Moveable {
-    fn move_left(&mut self, len: usize);
-    fn move_right(&mut self, len: usize);
-}
+pub type Input<'a> = nom_locate::LocatedSpan<&'a str>;
 
 /// Parse a todo list from the provided `&str`.
 ///
@@ -44,24 +24,20 @@ pub fn from_str(input: &str) -> impl Iterator<Item = Task<'_>> {
 
 pub fn parse_task<'a>() -> impl Parser<Input<'a>, Output = Option<Task<'a>>, Error = Error<'a>> {
     let parts = (
-        map(position, |pos: Input<'a>| pos.location_line()),
-        opt(map(terminated(tag("x"), space1), |pos| {
-            Span::locate(&pos, 1)
-        })),
+        map(position::<Input, _>, |pos| pos.location_line()),
+        opt(map(
+            (position, terminated(char('x'), space1)),
+            |(pos, x)| Located::new(Span::locate(&pos, 1), x),
+        )),
         opt(terminated(parse_priority(), space1)),
         opt((ymd(), opt(ymd()))),
         alt((
             map(preceded(space0, is_not("\r\n")), |output: Input<'a>| {
-                let data = output.fragment().trim_end();
-
-                Located {
-                    value: Cow::Borrowed(data),
-                    span: Span::locate(&output, data.len()),
-                }
+                let value = Cow::Borrowed(output.fragment().trim_end());
+                Located::new(Span::locate(&output, value.len()), value)
             }),
-            map(eof, |pos| Located {
-                value: Cow::Borrowed(""),
-                span: Span::locate(&pos, 0),
+            map(eof, |pos| {
+                Located::new(Span::locate(&pos, 0), Cow::Borrowed(""))
             }),
         )),
     );
@@ -170,109 +146,6 @@ fn ymd<'a>() -> impl Parser<Input<'a>, Output = Located<NaiveDate>, Error = Erro
             })
         },
     )
-}
-
-impl<T> Located<T> {
-    /// The location of the associated item.
-    ///
-    pub fn span(&self) -> &Span {
-        &self.span
-    }
-
-    /// A reference to value of the associated item.
-    ///
-    pub fn value(&self) -> &T {
-        &self.value
-    }
-}
-
-impl<T> Located<T> {
-    pub(crate) const fn new(span: Span, value: T) -> Self {
-        Self { span, value }
-    }
-
-    pub(crate) fn replace(&mut self, value: T) -> T {
-        mem::replace(&mut self.value, value)
-    }
-
-    pub(crate) fn map<U, F>(self, f: F) -> Located<U>
-    where
-        F: FnOnce(T) -> U,
-    {
-        Located {
-            span: self.span,
-            value: f(self.value),
-        }
-    }
-}
-
-impl<T: PartialEq> PartialEq for Located<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.value().eq(other.value())
-    }
-}
-
-impl<T: PartialOrd> PartialOrd for Located<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.value().partial_cmp(other.value())
-    }
-}
-
-impl Span {
-    pub fn start(&self) -> usize {
-        self.0
-    }
-
-    pub fn end(&self) -> usize {
-        self.1
-    }
-}
-
-impl Span {
-    pub(crate) fn new_unchecked(start: usize, end: usize) -> Self {
-        Self(start, end)
-    }
-
-    pub(crate) fn move_right(self, len: usize) -> Self {
-        Self(self.0 + len, self.1 + len)
-    }
-
-    fn locate(input: &Input, len: usize) -> Self {
-        let start = input.get_utf8_column() - 1;
-        Self(start, start + len)
-    }
-}
-
-impl Debug for Span {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Span({}, {})", self.start(), self.end())
-    }
-}
-
-impl<T> Moveable for Located<T> {
-    fn move_left(&mut self, len: usize) {
-        self.span.0 -= len;
-        self.span.1 -= len;
-    }
-
-    fn move_right(&mut self, len: usize) {
-        self.span.0 += len;
-        self.span.1 += len;
-    }
-}
-
-impl<T: Moveable> Moveable for Option<T> {
-    fn move_left(&mut self, len: usize) {
-        if let Some(location) = self.as_mut() {
-            location.move_left(len);
-        }
-    }
-
-    fn move_right(&mut self, len: usize) {
-        if let Some(location) = self.as_mut() {
-            location.move_right(len);
-        }
-    }
 }
 
 #[cfg(test)]
