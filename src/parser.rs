@@ -70,7 +70,7 @@ pub fn parse_tags<'a>(offset: usize, input: &'a str) -> impl Iterator<Item = Tag
     let typed = |ctor: fn(Located<&'a str>) -> Tag<'a>| {
         move |(pos, output): (Input<'a>, Input<'a>)| {
             ctor(Located {
-                span: Span::locate(&pos, output.len() + 1).move_right(offset),
+                span: Span::locate_from(&pos, output.len() + 1, offset),
                 value: output.into_fragment(),
             })
         }
@@ -86,7 +86,7 @@ pub fn parse_tags<'a>(offset: usize, input: &'a str) -> impl Iterator<Item = Tag
                 move |(name, value)| {
                     let len = name.len() + value.len() + 1;
                     Tag::Named(Located {
-                        span: Span::locate(&name, len).move_right(offset),
+                        span: Span::locate_from(&name, len, offset),
                         value: (name.into_fragment(), value.into_fragment()),
                     })
                 },

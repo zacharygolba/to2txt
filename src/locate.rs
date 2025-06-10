@@ -89,8 +89,10 @@ impl Span {
         Self(start, end)
     }
 
-    pub(crate) fn move_right(self, len: usize) -> Self {
-        Self(self.0 + len, self.1 + len)
+    pub(crate) fn locate_from(input: &Input, len: usize, offset: usize) -> Self {
+        let mut span = Self::locate(input, len);
+        span.translate_r(offset);
+        span
     }
 
     pub(crate) fn locate(input: &Input, len: usize) -> Self {
