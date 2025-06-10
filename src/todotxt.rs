@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::fmt::{self, Debug, Formatter};
+use std::fmt::{self, Debug, Display, Formatter};
 
 #[cfg(feature = "serde")]
 use serde::ser::SerializeStruct;
@@ -11,18 +11,15 @@ use serde::{Serialize, Serializer};
 use crate::parser::{self, Located, Span};
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Debug, PartialEq)]
-pub struct Description<'a>(pub(crate) Located<Cow<'a, str>>);
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[rustfmt::skip]
+#[repr(u8)]
+pub enum Priority {
+    A = 65, B, C, D, E, F, G, H, I, J, K, L, M,
+    N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
+}
 
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Debug, PartialEq)]
-pub struct Priority(pub(crate) Located<char>);
-
-#[cfg_attr(
-    feature = "serde",
-    derive(Serialize),
-    serde(tag = "type", rename_all = "lowercase")
-)]
+#[cfg_attr(feature = "serde", derive(Serialize), serde(tag = "type"))]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Tag<'a> {
     Context(Located<&'a str>),
@@ -33,56 +30,66 @@ pub enum Tag<'a> {
 /// A task from a todo list.
 ///
 #[derive(Clone)]
-#[non_exhaustive]
-pub struct Todo<'a> {
-    pub line: u32,
-    pub x: Option<Span>,
-    pub priority: Option<Priority>,
-    pub date_completed: Option<Located<NaiveDate>>,
-    pub date_started: Option<Located<NaiveDate>>,
-    pub description: Description<'a>,
+pub struct Task<'a> {
+    pub(crate) line: u32,
+    pub(crate) x: Option<Span>,
+    pub(crate) priority: Option<Located<Priority>>,
+    pub(crate) completed: Option<Located<NaiveDate>>,
+    pub(crate) started: Option<Located<NaiveDate>>,
+    pub(crate) description: Located<Cow<'a, str>>,
 }
 
-impl Description<'_> {
-    pub fn span(&self) -> &Span {
-        self.0.span()
-    }
-
-    /// A reference to the description text.
-    ///
-    pub fn value(&self) -> &str {
-        self.0.value.as_ref()
-    }
-
-    /// Returns an owned string containing the description text.
-    ///
-    pub fn into_string(self) -> String {
-        self.0.value.into_owned()
-    }
-}
-
-impl Priority {
-    pub fn span(&self) -> &Span {
-        self.0.span()
-    }
-
-    /// A reference to the ASCII uppercase character that is used for
-    /// priority-based ordering.
-    ///
-    pub fn value(&self) -> &char {
-        &self.0.value
+impl Display for Priority {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        Display::fmt(&((*self as u8) as char), f)
     }
 }
 
 impl PartialOrd for Priority {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.value()
-            .partial_cmp(other.value())
-            .map(Ordering::reverse)
+        Some((*self as u8).cmp(&(*other as u8)).reverse())
     }
 }
 
-impl Todo<'_> {
+impl Task<'_> {
+    pub fn line(&self) -> u32 {
+        self.line
+    }
+
+    pub fn x(&self) -> Option<&Span> {
+        self.x.as_ref()
+    }
+
+    pub fn priority(&self) -> Option<&Located<Priority>> {
+        self.priority.as_ref()
+    }
+
+    pub fn completed(&self) -> Option<&Located<NaiveDate>> {
+        self.completed.as_ref()
+    }
+
+    pub fn started(&self) -> Option<&Located<NaiveDate>> {
+        self.started.as_ref()
+    }
+
+    pub fn description(&self) -> Located<&str> {
+        let description = &self.description;
+
+        Located {
+            value: description.value.as_ref(),
+            span: description.span.clone(),
+        }
+    }
+
+    /// Returns an iterator over the tags in the todo's description.
+    ///
+    pub fn tags(&self) -> impl Iterator<Item = Tag<'_>> {
+        let description = &self.description;
+        let offset = description.span().start();
+
+        parser::parse_tags(offset, description.value())
+    }
+
     /// True if the todo starts with a lowercase "x" or has a `date_completed`.
     ///
     pub fn is_done(&self) -> bool {
@@ -90,37 +97,26 @@ impl Todo<'_> {
             self,
             Self { x: Some(_), .. }
                 | Self {
-                    date_completed: Some(_),
+                    completed: Some(_),
                     ..
                 }
         )
     }
 
-    /// Returns an iterator over the tags in the todo's description.
-    ///
-    pub fn tags(&self) -> impl Iterator<Item = Tag<'_>> {
-        parser::parse_tags(&self.description)
-    }
-
     /// Returns a clone of self with the description allocated on the heap.
     ///
-    pub fn into_owned(self) -> Todo<'static> {
-        let Description(Located { value, span }) = self.description;
-
-        Todo {
-            description: Description(Located {
-                value: Cow::Owned(value.into_owned()),
-                span,
-            }),
+    pub fn into_owned(self) -> Task<'static> {
+        Task {
+            description: self.description.map(|value| Cow::Owned(value.into_owned())),
             ..self
         }
     }
 }
 
-impl Debug for Todo<'_> {
+impl Debug for Task<'_> {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
         struct DebugTags<'a> {
-            todo: &'a Todo<'a>,
+            todo: &'a Task<'a>,
         }
 
         impl Debug for DebugTags<'_> {
@@ -133,19 +129,41 @@ impl Debug for Todo<'_> {
             .field("line", &self.line)
             .field("x", &self.x)
             .field("priority", &self.priority)
-            .field("date_completed", &self.date_completed)
-            .field("date_started", &self.date_started)
+            .field("completed", &self.completed)
+            .field("started", &self.started)
             .field("description", &self.description)
             .field("tags", &DebugTags { todo: self })
             .finish()
     }
 }
 
+impl Display for Task<'_> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        if self.x.is_some() {
+            write!(f, "x ")?;
+        }
+
+        if let Some(priority) = self.priority.as_ref() {
+            write!(f, "({}) ", priority.value())?;
+        }
+
+        if let Some(completed) = self.completed.as_ref() {
+            write!(f, "{} ", completed.value(),)?;
+        }
+
+        if let Some(started) = self.started.as_ref() {
+            write!(f, "{} ", started.value())?;
+        }
+
+        f.write_str(self.description.value())
+    }
+}
+
 #[cfg(feature = "serde")]
-impl Serialize for Todo<'_> {
+impl Serialize for Task<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         struct SerializeTags<'a> {
-            todo: &'a Todo<'a>,
+            todo: &'a Task<'a>,
         }
 
         impl Serialize for SerializeTags<'_> {
@@ -158,8 +176,8 @@ impl Serialize for Todo<'_> {
 
         state.serialize_field("x", &self.x)?;
         state.serialize_field("priority", &self.priority)?;
-        state.serialize_field("date_completed", &self.date_completed)?;
-        state.serialize_field("date_started", &self.date_started)?;
+        state.serialize_field("completed", &self.completed)?;
+        state.serialize_field("started", &self.started)?;
         state.serialize_field("description", &self.description)?;
         state.serialize_field("tags", &SerializeTags { todo: &self })?;
 
@@ -169,22 +187,12 @@ impl Serialize for Todo<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Located, Priority, Span};
+    use super::Priority;
 
     #[test]
     fn test_priority_order() {
-        let a = Priority(Located {
-            value: 'A',
-            span: Span::new(0, 0),
-        });
-
-        let b = Priority(Located {
-            value: 'B',
-            span: Span::new(0, 0),
-        });
-
         assert!(
-            a > b,
+            Priority::A > Priority::B,
             "Priority should be ordered alphabetically in descending order."
         )
     }
