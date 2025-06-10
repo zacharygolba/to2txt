@@ -102,7 +102,7 @@ fn parse_priority<'a>() -> impl Parser<Input<'a>, Output = Located<Priority>, Er
         (tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
         |(pos, uppercase, _)| {
             Located::new(Span::locate(&pos, 3), unsafe {
-                mem::transmute(uppercase as u8)
+                mem::transmute::<u8, _>(uppercase as u8)
             })
         },
     )
