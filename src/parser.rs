@@ -9,6 +9,7 @@ use nom_locate::position;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug, Formatter};
+use std::mem;
 use std::str::FromStr;
 
 #[cfg(feature = "serde")]
@@ -20,7 +21,7 @@ type Error<'a> = nom::error::Error<Input<'a>>;
 type Input<'a> = nom_locate::LocatedSpan<&'a str>;
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, PartialEq, PartialOrd)]
 pub struct Span(usize, usize);
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
@@ -30,25 +31,71 @@ pub struct Located<T> {
     pub(crate) span: Span,
 }
 
+pub trait Moveable {
+    fn move_left(&mut self, len: usize);
+    fn move_right(&mut self, len: usize);
+}
+
 /// Parse a todo list from the provided `&str`.
 ///
 pub fn from_str(input: &str) -> impl Iterator<Item = Task<'_>> {
-    let parse1 = alt((
-        map(map_parser(preceded(space0, is_not("\r\n")), task()), Some),
-        map(preceded(space0, peek(one_of("\r\n"))), |_| None),
-    ));
+    iterator(input.into(), delimited(eol, parse_task(), eol)).flatten()
+}
 
-    iterator(input.into(), delimited(eol, parse1, eol)).flatten()
+pub fn parse_task<'a>() -> impl Parser<Input<'a>, Output = Option<Task<'a>>, Error = Error<'a>> {
+    let parts = (
+        map(position, |pos: Input<'a>| pos.location_line()),
+        opt(map(terminated(tag("x"), space1), |pos| {
+            Span::locate(&pos, 1)
+        })),
+        opt(terminated(parse_priority(), space1)),
+        opt((ymd(), opt(ymd()))),
+        alt((
+            map(preceded(space0, is_not("\r\n")), |output: Input<'a>| {
+                let data = output.fragment().trim_end();
+
+                Located {
+                    value: Cow::Borrowed(data),
+                    span: Span::locate(&output, data.len()),
+                }
+            }),
+            map(eof, |pos| Located {
+                value: Cow::Borrowed(""),
+                span: Span::locate(&pos, 0),
+            }),
+        )),
+    );
+
+    alt((
+        map(
+            map_parser(preceded(space0, is_not("\r\n")), parts),
+            |(line, x, priority, dates, description)| {
+                let (completed, started) = match dates {
+                    Some((d1, Some(d2))) => (Some(d1), Some(d2)),
+                    Some((d1, None)) => (None, Some(d1)),
+                    None => (None, None),
+                };
+
+                Some(Task {
+                    line,
+                    x,
+                    priority,
+                    completed,
+                    started,
+                    description,
+                })
+            },
+        ),
+        map(preceded(space0, peek(one_of("\r\n"))), |_| None),
+    ))
 }
 
 pub fn parse_tags<'a>(offset: usize, input: &'a str) -> impl Iterator<Item = Tag<'a>> {
     let typed = |ctor: fn(Located<&'a str>) -> Tag<'a>| {
         move |(pos, output): (Input<'a>, Input<'a>)| {
-            let len = output.fragment().len() + 1;
-
             ctor(Located {
+                span: Span::locate(&pos, output.len() + 1).move_right(offset),
                 value: output.into_fragment(),
-                span: Span::locate_from(&pos, len, offset),
             })
         }
     };
@@ -61,11 +108,10 @@ pub fn parse_tags<'a>(offset: usize, input: &'a str) -> impl Iterator<Item = Tag
             map(
                 separated_pair(is_not(" :"), tag(":"), word()),
                 move |(name, value)| {
-                    let len = name.fragment().len() + value.fragment().len() + 1;
-
+                    let len = name.len() + value.len() + 1;
                     Tag::Named(Located {
+                        span: Span::locate(&name, len).move_right(offset),
                         value: (name.into_fragment(), value.into_fragment()),
-                        span: Span::locate_from(&name, len, offset),
                     })
                 },
             ),
@@ -80,51 +126,8 @@ fn parse_priority<'a>() -> impl Parser<Input<'a>, Output = Located<Priority>, Er
         (tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
         |(pos, uppercase, _)| {
             Located::new(Span::locate(&pos, 3), unsafe {
-                std::mem::transmute(uppercase as u8)
+                mem::transmute(uppercase as u8)
             })
-        },
-    )
-}
-
-fn task<'a>() -> impl Parser<Input<'a>, Output = Task<'a>, Error = Error<'a>> {
-    map(
-        (
-            map(position, |pos: Input<'a>| pos.location_line()),
-            opt(map(terminated(tag("x"), space1), |pos| {
-                Span::locate(&pos, 1)
-            })),
-            opt(terminated(parse_priority(), space1)),
-            opt((ymd(), opt(ymd()))),
-            alt((
-                map(preceded(space0, is_not("\r\n")), |output: Input<'a>| {
-                    let data = output.fragment().trim_end();
-
-                    Located {
-                        value: Cow::Borrowed(data),
-                        span: Span::locate(&output, data.len()),
-                    }
-                }),
-                map(eof, |pos| Located {
-                    value: Cow::Borrowed(""),
-                    span: Span::locate(&pos, 0),
-                }),
-            )),
-        ),
-        |(line, x, priority, dates, description)| {
-            let (date_completed, date_started) = match dates {
-                Some((first, Some(second))) => (Some(first), Some(second)),
-                Some((first, None)) => (None, Some(first)),
-                None => (None, None),
-            };
-
-            Task {
-                line,
-                x,
-                priority,
-                completed: date_completed,
-                started: date_started,
-                description,
-            }
         },
     )
 }
@@ -188,6 +191,10 @@ impl<T> Located<T> {
         Self { span, value }
     }
 
+    pub(crate) fn replace(&mut self, value: T) -> T {
+        mem::replace(&mut self.value, value)
+    }
+
     pub(crate) fn map<U, F>(self, f: F) -> Located<U>
     where
         F: FnOnce(T) -> U,
@@ -222,17 +229,49 @@ impl Span {
 }
 
 impl Span {
+    pub(crate) fn new_unchecked(start: usize, end: usize) -> Self {
+        Self(start, end)
+    }
+
+    pub(crate) fn move_right(self, len: usize) -> Self {
+        Self(self.0 + len, self.1 + len)
+    }
+
     fn locate(input: &Input, len: usize) -> Self {
         let start = input.get_utf8_column() - 1;
         Self(start, start + len)
     }
+}
 
-    fn locate_from(input: &Input, len: usize, offset: usize) -> Self {
-        let mut span = Self::locate(input, len);
+impl Debug for Span {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Span({}, {})", self.start(), self.end())
+    }
+}
 
-        span.0 += offset;
-        span.1 += offset;
-        span
+impl<T> Moveable for Located<T> {
+    fn move_left(&mut self, len: usize) {
+        self.span.0 -= len;
+        self.span.1 -= len;
+    }
+
+    fn move_right(&mut self, len: usize) {
+        self.span.0 += len;
+        self.span.1 += len;
+    }
+}
+
+impl<T: Moveable> Moveable for Option<T> {
+    fn move_left(&mut self, len: usize) {
+        if let Some(location) = self.as_mut() {
+            location.move_left(len);
+        }
+    }
+
+    fn move_right(&mut self, len: usize) {
+        if let Some(location) = self.as_mut() {
+            location.move_right(len);
+        }
     }
 }
 

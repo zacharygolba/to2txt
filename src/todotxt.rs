@@ -1,14 +1,16 @@
 use chrono::NaiveDate;
+use nom::Parser;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display, Formatter};
+use std::str::FromStr;
 
 #[cfg(feature = "serde")]
 use serde::ser::SerializeStruct;
 #[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 
-use crate::parser::{self, Located, Span};
+use crate::parser::{self, Located, Moveable, Span};
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -19,7 +21,11 @@ pub enum Priority {
     N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
 }
 
-#[cfg_attr(feature = "serde", derive(Serialize), serde(tag = "type"))]
+#[cfg_attr(
+    feature = "serde",
+    derive(Serialize),
+    serde(tag = "type", rename_all = "UPPERCASE")
+)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Tag<'a> {
     Context(Located<&'a str>),
@@ -41,7 +47,7 @@ pub struct Task<'a> {
 
 impl Display for Priority {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        Display::fmt(&((*self as u8) as char), f)
+        write!(f, "({})", (*self as u8) as char)
     }
 }
 
@@ -60,16 +66,98 @@ impl Task<'_> {
         self.x.as_ref()
     }
 
+    /// True if the todo starts with a lowercase "x" or has a `completed` date.
+    ///
+    pub fn is_complete(&self) -> bool {
+        matches!(
+            self,
+            Self { x: Some(_), .. }
+                | Self {
+                    completed: Some(_),
+                    ..
+                }
+        )
+    }
+
+    pub fn mark_complete(&mut self) -> &mut Self {
+        if self.x.is_none() {
+            let len = 3;
+
+            self.x = Some(Span::new_unchecked(0, 1));
+
+            self.priority.move_right(len);
+            self.completed.move_right(len);
+            self.started.move_right(len);
+            self.description.move_right(len);
+        }
+
+        self
+    }
+
+    pub fn mark_incomplete(&mut self) -> &mut Self {
+        if self.x.is_some() {
+            let len = 3;
+
+            self.x = None;
+
+            self.completed.move_left(len);
+            self.started.move_left(len);
+            self.description.move_left(len);
+        }
+
+        self
+    }
+
     pub fn priority(&self) -> Option<&Located<Priority>> {
         self.priority.as_ref()
+    }
+
+    pub fn set_priority(&mut self, priority: Option<Priority>) -> &mut Self {
+        let len = 3;
+
+        match (self.priority.as_mut(), priority) {
+            (Some(existing), Some(value)) => {
+                existing.replace(value);
+            }
+            (None, Some(value)) => {
+                let start = self.x().map_or(0, |span| span.start() + 1);
+                let span = Span::new_unchecked(start, start + len);
+
+                self.priority = Some(Located::new(span, value));
+
+                self.completed.move_right(len + 1);
+                self.started.move_right(len + 1);
+                self.description.move_right(len + 1);
+            }
+            (Some(_), None) => {
+                self.priority = None;
+
+                self.completed.move_left(len + 1);
+                self.started.move_left(len + 1);
+                self.description.move_left(len + 1);
+            }
+            (None, None) => {
+                // noop
+            }
+        }
+
+        self
     }
 
     pub fn completed(&self) -> Option<&Located<NaiveDate>> {
         self.completed.as_ref()
     }
 
+    pub fn set_completed(&mut self, completed: Option<NaiveDate>) -> &mut Self {
+        todo!()
+    }
+
     pub fn started(&self) -> Option<&Located<NaiveDate>> {
         self.started.as_ref()
+    }
+
+    pub fn set_started(&mut self, started: Option<NaiveDate>) -> &mut Self {
+        todo!()
     }
 
     pub fn description(&self) -> Located<&str> {
@@ -88,19 +176,6 @@ impl Task<'_> {
         let offset = description.span().start();
 
         parser::parse_tags(offset, description.value())
-    }
-
-    /// True if the todo starts with a lowercase "x" or has a `date_completed`.
-    ///
-    pub fn is_done(&self) -> bool {
-        matches!(
-            self,
-            Self { x: Some(_), .. }
-                | Self {
-                    completed: Some(_),
-                    ..
-                }
-        )
     }
 
     /// Returns a clone of self with the description allocated on the heap.
@@ -144,7 +219,7 @@ impl Display for Task<'_> {
         }
 
         if let Some(priority) = self.priority.as_ref() {
-            write!(f, "({}) ", priority.value())?;
+            write!(f, "{} ", priority.value())?;
         }
 
         if let Some(completed) = self.completed.as_ref() {
@@ -156,6 +231,17 @@ impl Display for Task<'_> {
         }
 
         f.write_str(self.description.value())
+    }
+}
+
+impl FromStr for Task<'static> {
+    type Err = String;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        match parser::parse_task().parse(input.into()) {
+            Ok((_, Some(task))) => Ok(task.into_owned()),
+            _ => Err("unexpected end of input".to_owned()),
+        }
     }
 }
 
@@ -187,7 +273,35 @@ impl Serialize for Task<'_> {
 
 #[cfg(test)]
 mod tests {
+    use crate::Task;
+
     use super::Priority;
+
+    type Error = Box<dyn std::error::Error>;
+
+    #[test]
+    fn test_set_priority() -> Result<(), Error> {
+        let mut with_x: Task = "x feed the tomato plants".parse()?;
+        let mut with_dates: Task = "2025-06-10 2025-06-10 feed the tomato plants".parse()?;
+        let mut with_existing: Task = "(A) feed the tomato plants".parse()?;
+
+        with_x.set_priority(Some(Priority::A));
+        println!("{}", with_x);
+
+        with_x.mark_incomplete();
+        println!("{}", with_x);
+
+        with_dates.set_priority(Some(Priority::A));
+        println!("{}", with_dates);
+
+        with_existing.set_priority(Some(Priority::B));
+        println!("{}", with_existing);
+
+        with_existing.set_priority(None);
+        println!("{}", with_existing);
+
+        Ok(())
+    }
 
     #[test]
     fn test_priority_order() {
