@@ -1,5 +1,5 @@
 mod parser;
-mod todotxt;
+mod task;
 
-pub use parser::{from_str, Located, Span};
-pub use todotxt::{Description, Priority, Tag, Todo};
+pub use parser::{Token, from_str};
+pub use task::{Priority, Tag, Task};

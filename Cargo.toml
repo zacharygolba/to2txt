@@ -2,7 +2,7 @@
 name = "to2txt"
 version = "1.0.0-beta.2"
 authors = ["Zachary Golba <zachary.golba@postlight.com>"]
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "A zero-copy parser for the todo.txt format."
 homepage = "https://to2txt.vercel.app/"

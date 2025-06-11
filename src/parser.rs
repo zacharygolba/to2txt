@@ -1,138 +1,98 @@
-use chrono::NaiveDate;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, take, take_while1};
-use nom::character::complete::{line_ending, one_of, space0, space1};
-use nom::combinator::{eof, iterator, map, map_opt, map_parser, map_res, opt, peek};
+use nom::character::complete::{char, line_ending, one_of, space0, space1};
+use nom::combinator::{iterator, map, map_parser, map_res, opt, rest};
 use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use nom::{IResult, Parser};
 use nom_locate::position;
-use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::str::FromStr;
 
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
-use crate::todotxt::{Description, Priority, Tag, Todo};
+use crate::task::{Tag, Task};
 
 type Error<'a> = nom::error::Error<Input<'a>>;
-type Input<'a> = nom_locate::LocatedSpan<&'a str>;
 
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Debug, PartialEq)]
-pub struct Located<T> {
-    pub(crate) data: T,
-    pub(crate) span: Span,
-}
+pub(crate) type Input<'a> = nom_locate::LocatedSpan<&'a str>;
+pub(crate) type Parts<'a> = (
+    Input<'a>,
+    Option<char>,
+    Option<(Input<'a>, char, Input<'a>)>,
+    Option<(Input<'a>, (i32, u32, u32))>,
+    Option<(Input<'a>, (i32, u32, u32))>,
+    Input<'a>,
+);
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
-pub struct Span {
-    start: usize,
-    end: usize,
+pub struct Span(usize, usize);
+
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Clone, Debug)]
+pub struct Token<T> {
+    pub(crate) value: T,
+    pub(crate) span: Span,
 }
 
 /// Parse a todo list from the provided `&str`.
 ///
-pub fn from_str(input: &str) -> impl Iterator<Item = Todo<'_>> {
-    let parse1 = alt((
-        map(map_parser(preceded(space0, is_not("\r\n")), todo()), Some),
-        map(preceded(space0, peek(one_of("\r\n"))), |_| None),
-    ));
-
-    iterator(input.into(), delimited(eol, parse1, eol)).flatten()
+pub fn from_str(input: &str) -> impl Iterator<Item = Task<'_>> {
+    iterator(input.into(), delimited(eol, task, eol)).flatten()
 }
 
-pub fn parse_tags<'a>(description: &'a Description) -> impl Iterator<Item = Tag<'a>> {
-    let typed = |ctor: fn(Located<&'a str>) -> Tag<'a>| {
-        move |(pos, output): (Input<'a>, Input<'a>)| {
-            let len = output.fragment().len() + 1;
-            let from = description.span().start();
+pub fn task(input: Input) -> IResult<Input, Option<Task>> {
+    let mut parser = map_parser(
+        is_not("\r\n"),
+        (
+            preceded(space0, position),
+            opt(terminated(char('x'), space1)),
+            opt(terminated(
+                (tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
+                space1,
+            )),
+            opt((position, terminated(ymd, space1))),
+            opt((position, terminated(ymd, space1))),
+            map(preceded(space0, rest), trim_end),
+        ),
+    );
 
-            ctor(Located {
-                data: output.into_fragment(),
-                span: Span::locate_from(&pos, len, from),
-            })
+    parser.parse(input).map(|(rest, parts)| match &parts {
+        (_, None, None, None, None, d) if d.is_empty() => (rest, None),
+        _ => (rest, Some(Task::from_parts(parts))),
+    })
+}
+
+pub fn tags<'a>(offset: usize, description: &'a str) -> impl Iterator<Item = Tag<'a>> {
+    let typed = |ctor: fn(Token<&'a str>) -> Tag<'a>| {
+        move |(pos, output): (Input<'a>, Input<'a>)| {
+            ctor(Token::new(
+                Span::locate_from(&pos, output.len() + 1, offset),
+                output.into_fragment(),
+            ))
         }
     };
 
     let parse1 = map_parser(
-        preceded(space0, word()),
+        preceded(space0, word),
         opt(alt((
-            map((tag("@"), word()), typed(Tag::Context)),
-            map((tag("+"), word()), typed(Tag::Project)),
+            map((tag("@"), word), typed(Tag::Context)),
+            map((tag("+"), word), typed(Tag::Project)),
             map(
-                separated_pair(is_not(" :"), tag(":"), word()),
-                |(name, value)| {
-                    let len = name.fragment().len() + value.fragment().len() + 1;
-                    let from = description.span().start();
-
-                    Tag::Named(Located {
-                        data: (name.into_fragment(), value.into_fragment()),
-                        span: Span::locate_from(&name, len, from),
-                    })
+                separated_pair(is_not(" :"), tag(":"), word),
+                move |(name, value)| {
+                    let len = name.len() + value.len() + 1;
+                    Tag::Named(Token::new(
+                        Span::locate_from(&name, len, offset),
+                        (name.into_fragment(), value.into_fragment()),
+                    ))
                 },
             ),
         ))),
     );
 
-    iterator(description.text().into(), parse1).flatten()
-}
-
-fn todo<'a>() -> impl Parser<Input<'a>, Output = Todo<'a>, Error = Error<'a>> {
-    map(
-        (
-            map(position, |pos: Input<'a>| pos.location_line()),
-            opt(map(terminated(tag("x"), space1), |pos| {
-                Span::locate(&pos, 1)
-            })),
-            opt(map(
-                terminated(
-                    (
-                        position,
-                        delimited(tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
-                    ),
-                    space1,
-                ),
-                |(pos, data)| {
-                    let span = Span::locate(&pos, 3);
-                    Priority(Located { data, span })
-                },
-            )),
-            opt((ymd(), opt(ymd()))),
-            alt((
-                map(preceded(space0, is_not("\r\n")), |output: Input<'a>| {
-                    let data = output.into_fragment().trim_end();
-
-                    Description(Located {
-                        data: Cow::Borrowed(data),
-                        span: Span::locate(&output, data.len()),
-                    })
-                }),
-                map(eof, |pos| {
-                    Description(Located {
-                        data: Cow::Borrowed(""),
-                        span: Span::locate(&pos, 0),
-                    })
-                }),
-            )),
-        ),
-        |(line, x, priority, dates, description)| {
-            let (date_completed, date_started) = match dates {
-                Some((first, Some(second))) => (Some(first), Some(second)),
-                Some((first, None)) => (None, Some(first)),
-                None => (None, None),
-            };
-
-            Todo {
-                line,
-                x,
-                priority,
-                date_completed,
-                date_started,
-                description,
-            }
-        },
-    )
+    iterator(description.into(), parse1).flatten()
 }
 
 fn eol(input: Input) -> IResult<Input, ()> {
@@ -153,90 +113,101 @@ where
     map_res(parser, |output| output.fragment().parse())
 }
 
-fn word<'a>() -> impl Parser<Input<'a>, Output = Input<'a>, Error = Error<'a>> {
-    take_while1(|c: char| !c.is_whitespace())
+fn trim_end(input: Input) -> Input {
+    // Safety:
+    // We do not changing the original offset. The returned input can always
+    // produce valid index range.
+    unsafe {
+        Input::new_from_raw_offset(
+            input.location_offset(),
+            input.location_line(),
+            input.into_fragment().trim_end(),
+            (),
+        )
+    }
 }
 
-fn ymd<'a>() -> impl Parser<Input<'a>, Output = Located<NaiveDate>, Error = Error<'a>> {
-    let triple = (
+fn word(input: Input) -> IResult<Input, Input> {
+    take_while1(|c: char| !c.is_whitespace()).parse(input)
+}
+
+fn ymd(input: Input) -> IResult<Input, (i32, u32, u32)> {
+    let mut parser = (
         terminated(parse_to(take(4usize)), tag("-")),
         terminated(parse_to(take(2usize)), tag("-")),
         parse_to(take(2usize)),
     );
 
-    map_opt(
-        (position, terminated(triple, space1)),
-        |(pos, (y, m, d))| {
-            Some(Located {
-                data: NaiveDate::from_ymd_opt(y, m, d)?,
-                span: Span::locate(&pos, 10),
-            })
-        },
-    )
-}
-
-impl<T> Located<T> {
-    /// A reference to value of the associated item.
-    ///
-    pub fn data(&self) -> &T {
-        &self.data
-    }
-
-    /// The location of the associated item.
-    ///
-    pub fn span(&self) -> &Span {
-        &self.span
-    }
+    parser.parse(input)
 }
 
 impl Span {
+    pub(crate) fn locate(input: &Input, len: usize) -> Self {
+        let start = input.get_utf8_column() - 1;
+        Self(start, start + len)
+    }
+
+    pub(crate) fn locate_from(input: &Input, len: usize, offset: usize) -> Self {
+        let mut span = Self::locate(input, len);
+
+        span.0 += offset;
+        span.1 += offset;
+
+        span
+    }
+}
+
+impl<T> Token<T> {
+    /// A reference to value of the associated item.
+    ///
+    pub fn value(&self) -> &T {
+        &self.value
+    }
+
     pub fn start(&self) -> usize {
-        self.start
+        self.span.0
     }
 
     pub fn end(&self) -> usize {
-        self.end
+        self.span.1
     }
 }
 
-impl Span {
-    #[cfg(test)]
-    pub(crate) fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
+impl<T> Token<T> {
+    pub(crate) fn new(span: Span, value: T) -> Self {
+        Self { span, value }
     }
 
-    fn locate(input: &Input, len: usize) -> Self {
-        let start = input.get_utf8_column() - 1;
-        let end = start + len;
-
-        Self { start, end }
-    }
-
-    fn locate_from(input: &Input, len: usize, offset: usize) -> Self {
-        let span = Self::locate(input, len);
-
-        Self {
-            start: span.start + offset,
-            end: span.end + offset,
+    pub(crate) fn map<U, F>(self, f: F) -> Token<U>
+    where
+        F: FnOnce(T) -> U,
+    {
+        Token {
+            value: f(self.value),
+            span: self.span,
         }
+    }
+}
+
+impl<T: PartialEq> PartialEq for Token<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value().eq(other.value())
+    }
+}
+
+impl<T: PartialOrd> PartialOrd for Token<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.value().partial_cmp(other.value())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
-
-    use super::{Located, Span};
-    use crate::todotxt::Description;
-
     #[test]
     fn test_parse_tags() {
-        let text = "feed the tomato plants @home +garden due:2025-06-10";
-        let desc = Description(Located {
-            data: Cow::Borrowed(text),
-            span: Span::new(3, text.len() + 3),
-        });
+        let input = "feed the tomato plants @home +garden due:2025-06-10";
+        let tags = super::tags(0, input).collect::<Vec<_>>();
 
-        assert_eq!(super::parse_tags(&desc).collect::<Vec<_>>().len(), 3);
+        assert_eq!(tags.len(), 3);
     }
 }
