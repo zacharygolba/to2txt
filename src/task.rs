@@ -10,8 +10,7 @@ use serde::ser::SerializeStruct;
 #[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 
-use crate::parser::{self, Token};
-use crate::Span;
+use crate::parser::{self, Span, Token};
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
