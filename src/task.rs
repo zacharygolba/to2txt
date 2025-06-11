@@ -2,7 +2,6 @@ use chrono::NaiveDate;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display, Formatter};
-use std::mem;
 use std::str::FromStr;
 
 #[cfg(feature = "serde")]
@@ -10,7 +9,7 @@ use serde::ser::SerializeStruct;
 #[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 
-use crate::parser::{self, Input, Parts, Span, Token};
+use crate::parser::{self, Token};
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -41,18 +40,9 @@ pub struct Task<'a> {
     pub line: u32,
     pub x: Option<Token<char>>,
     pub priority: Option<Token<Priority>>,
-    pub completed: Option<Token<NaiveDate>>,
-    pub started: Option<Token<NaiveDate>>,
+    pub completed_on: Option<Token<NaiveDate>>,
+    pub started_on: Option<Token<NaiveDate>>,
     pub description: Token<Cow<'a, str>>,
-}
-
-fn date_from_ymd(output: (Input, (i32, u32, u32))) -> Option<Token<NaiveDate>> {
-    let (pos, (y, m, d)) = output;
-
-    Some(Token::new(
-        Span::locate(&pos, 10),
-        NaiveDate::from_ymd_opt(y, m, d)?,
-    ))
 }
 
 impl Display for Priority {
@@ -86,7 +76,7 @@ impl Task<'_> {
             self,
             Self { x: Some(_), .. }
                 | Self {
-                    completed: Some(_),
+                    completed_on: Some(_),
                     ..
                 }
         )
@@ -100,31 +90,6 @@ impl Task<'_> {
                 Cow::Owned(value.into_owned()) // Allocation
             }),
             ..self
-        }
-    }
-}
-
-impl<'a> Task<'a> {
-    pub(crate) fn from_parts(parts: Parts<'a>) -> Self {
-        let (pos, x, priority, completed, started, description) = parts;
-
-        Self {
-            line: pos.location_line(),
-            x: x.map(|value| Token::new(Span::locate(&pos, 1), value)),
-            priority: priority.map(|(pos, uppercase, _)| {
-                Token::new(
-                    Span::locate(&pos, 3),
-                    // Safety:
-                    // The one_of combinator ensures uppercase is 65..=90.
-                    unsafe { mem::transmute::<u8, Priority>(uppercase as u8) },
-                )
-            }),
-            completed: completed.and_then(date_from_ymd),
-            started: started.and_then(date_from_ymd),
-            description: Token::new(
-                Span::locate(&description, description.len()),
-                Cow::Borrowed(description.into_fragment()),
-            ),
         }
     }
 }
@@ -149,8 +114,8 @@ impl Debug for Task<'_> {
             .field("line", &self.line)
             .field("x", &self.x)
             .field("priority", &self.priority)
-            .field("completed", &self.completed)
-            .field("started", &self.started)
+            .field("completed_on", &self.completed_on)
+            .field("started_on", &self.started_on)
             .field("description", description)
             .field("tags", &DebugTags(description))
             .finish()
@@ -161,8 +126,8 @@ impl Display for Task<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let x = &self.x;
         let priority = &self.priority;
-        let completed = &self.completed;
-        let started = &self.started;
+        let completed = &self.completed_on;
+        let started = &self.started_on;
         let description = &self.description;
 
         if x.is_some() {
@@ -216,8 +181,8 @@ impl Serialize for Task<'_> {
 
         state.serialize_field("x", &self.x)?;
         state.serialize_field("priority", &self.priority)?;
-        state.serialize_field("completed", &self.completed)?;
-        state.serialize_field("started", &self.started)?;
+        state.serialize_field("completed_on", &self.completed_on)?;
+        state.serialize_field("started_on", &self.started_on)?;
         state.serialize_field("description", description)?;
         state.serialize_field("tags", &SerializeTags(description))?;
 

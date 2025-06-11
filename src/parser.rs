@@ -1,3 +1,4 @@
+use chrono::NaiveDate;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, take, take_while1};
 use nom::character::complete::{char, line_ending, one_of, space0, space1};
@@ -5,18 +6,20 @@ use nom::combinator::{iterator, map, map_parser, map_res, opt, rest};
 use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use nom::{IResult, Parser};
 use nom_locate::position;
+use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::mem;
 use std::str::FromStr;
 
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
+use crate::Priority;
 use crate::task::{Tag, Task};
 
 type Error<'a> = nom::error::Error<Input<'a>>;
-
-pub(crate) type Input<'a> = nom_locate::LocatedSpan<&'a str>;
-pub(crate) type Parts<'a> = (
+type Input<'a> = nom_locate::LocatedSpan<&'a str>;
+type Parts<'a> = (
     Input<'a>,
     Option<char>,
     Option<(Input<'a>, char, Input<'a>)>,
@@ -59,8 +62,8 @@ pub fn task(input: Input) -> IResult<Input, Option<Task>> {
     );
 
     parser.parse(input).map(|(rest, parts)| match &parts {
-        (_, None, None, None, None, d) if d.is_empty() => (rest, None),
-        _ => (rest, Some(Task::from_parts(parts))),
+        (_, None, None, None, None, description) if description.is_empty() => (rest, None),
+        _ => (rest, Some(task_from_parts(parts))),
     })
 }
 
@@ -95,6 +98,15 @@ pub fn tags<'a>(offset: usize, description: &'a str) -> impl Iterator<Item = Tag
     iterator(description.into(), parse1).flatten()
 }
 
+fn date_from_ymd(output: (Input, (i32, u32, u32))) -> Option<Token<NaiveDate>> {
+    let (pos, (y, m, d)) = output;
+
+    Some(Token::new(
+        Span::locate(&pos, 10),
+        NaiveDate::from_ymd_opt(y, m, d)?,
+    ))
+}
+
 fn eol(input: Input) -> IResult<Input, ()> {
     let mut rest = input;
 
@@ -111,6 +123,29 @@ where
     P: Parser<Input<'a>, Output = Input<'a>, Error = Error<'a>>,
 {
     map_res(parser, |output| output.fragment().parse())
+}
+
+fn task_from_parts(parts: Parts) -> Task {
+    let (pos, x, priority, completed_on, started_on, description) = parts;
+
+    Task {
+        line: pos.location_line(),
+        x: x.map(|value| Token::new(Span::locate(&pos, 1), value)),
+        priority: priority.map(|(pos, uppercase, _)| {
+            Token::new(
+                Span::locate(&pos, 3),
+                // Safety:
+                // The one_of combinator ensures uppercase is 65..=90.
+                unsafe { mem::transmute::<u8, Priority>(uppercase as u8) },
+            )
+        }),
+        completed_on: completed_on.and_then(date_from_ymd),
+        started_on: started_on.and_then(date_from_ymd),
+        description: Token::new(
+            Span::locate(&description, description.len()),
+            Cow::Borrowed(description.into_fragment()),
+        ),
+    }
 }
 
 fn trim_end(input: Input) -> Input {
