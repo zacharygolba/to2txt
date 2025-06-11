@@ -10,7 +10,7 @@ use serde::ser::SerializeStruct;
 #[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 
-use crate::parser::{self, Span, Token};
+use crate::parser::{self, Token};
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -39,7 +39,7 @@ pub enum Tag<'a> {
 #[non_exhaustive]
 pub struct Task<'a> {
     pub line: u32,
-    pub x: Option<Span>,
+    pub x: Option<Token<char>>,
     pub priority: Option<Token<Priority>>,
     pub completed: Option<Token<NaiveDate>>,
     pub started: Option<Token<NaiveDate>>,
@@ -153,7 +153,7 @@ impl FromStr for Task<'static> {
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         match parser::parse_task().parse(input.into()) {
             Ok((_, Some(task))) => Ok(task.into_owned()),
-            _ => Err("unexpected end of input".to_owned()),
+            _ => Err("unexpected end of input".to_owned()), // Allocation
         }
     }
 }

@@ -1,7 +1,7 @@
 use chrono::NaiveDate;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, take, take_while1};
-use nom::character::complete::{line_ending, one_of, space0, space1};
+use nom::character::complete::{char, line_ending, one_of, space0, space1};
 use nom::combinator::{eof, iterator, map, map_parser, map_res, opt, peek, value};
 use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use nom::{IResult, Parser};
@@ -11,10 +11,10 @@ use std::cmp::Ordering;
 use std::mem;
 use std::str::FromStr;
 
-use crate::task::{Priority, Tag, Task};
-
 #[cfg(feature = "serde")]
 use serde::Serialize;
+
+use crate::task::{Priority, Tag, Task};
 
 type Error<'a> = nom::error::Error<Input<'a>>;
 type Input<'a> = nom_locate::LocatedSpan<&'a str>;
@@ -40,7 +40,7 @@ pub fn parse_task<'a>() -> impl Parser<Input<'a>, Output = Option<Task<'a>>, Err
     let task = map(
         (
             position,
-            opt(terminated(tag("x"), space1)),
+            opt(terminated(char('x'), space1)),
             opt(terminated(
                 (tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
                 space1,
@@ -54,16 +54,12 @@ pub fn parse_task<'a>() -> impl Parser<Input<'a>, Output = Option<Task<'a>>, Err
 
             Some(Task {
                 line: pos.location_line(),
-                x: x.map(|o| Span::locate(&o, 1)),
+                x: x.map(|value| Token::new(Span::locate(&pos, 1), value)),
                 priority: priority.map(|(pos, uppercase, _)| {
                     Token::new(
                         Span::locate(&pos, 3),
                         // Safety:
-                        //
-                        // The one_of combinator always produces an ASCII uppercase char.
-                        // The Priority enum variants intentionally map to the ASCII
-                        // uppercase range.
-                        //
+                        // The one_of combinator ensures uppercase is 65..=90.
                         unsafe { mem::transmute::<u8, Priority>(uppercase as u8) },
                     )
                 }),
