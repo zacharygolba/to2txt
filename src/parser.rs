@@ -2,7 +2,7 @@ use chrono::NaiveDate;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, take, take_while1};
 use nom::character::complete::{char, line_ending, one_of, space0, space1};
-use nom::combinator::{eof, iterator, map, map_parser, map_res, opt, peek, value};
+use nom::combinator::{eof, iterator, map, map_parser, map_res, opt};
 use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use nom::{IResult, Parser};
 use nom_locate::position;
@@ -32,54 +32,55 @@ pub struct Token<T> {
 
 /// Parse a todo list from the provided `&str`.
 ///
-pub fn from_str(value: &str) -> impl Iterator<Item = Task<'_>> {
-    iterator(Input::new(value), delimited(eol, parse_task(), eol)).flatten()
+pub fn from_str(input: &str) -> impl Iterator<Item = Task<'_>> {
+    iterator(input.into(), delimited(eol, task, eol))
 }
 
-pub fn parse_task<'a>() -> impl Parser<Input<'a>, Output = Option<Task<'a>>, Error = Error<'a>> {
-    let task = map(
+pub fn task(input: Input) -> IResult<Input, Task> {
+    let mut parser = map_parser(
+        is_not("\r\n"),
         (
-            position,
+            preceded(space0, position),
             opt(terminated(char('x'), space1)),
             opt(terminated(
                 (tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
                 space1,
             )),
-            opt((position, terminated(ymd(), space1))),
-            opt((position, terminated(ymd(), space1))),
+            opt((position, terminated(ymd, space1))),
+            opt((position, terminated(ymd, space1))),
             alt((preceded(space0, is_not("\r\n")), eof)),
         ),
-        |(pos, x, priority, completed, started, desc)| {
-            let desc_text = desc.into_fragment().trim_end();
-
-            Some(Task {
-                line: pos.location_line(),
-                x: x.map(|value| Token::new(Span::locate(&pos, 1), value)),
-                priority: priority.map(|(pos, uppercase, _)| {
-                    Token::new(
-                        Span::locate(&pos, 3),
-                        // Safety:
-                        // The one_of combinator ensures uppercase is 65..=90.
-                        unsafe { mem::transmute::<u8, Priority>(uppercase as u8) },
-                    )
-                }),
-                completed: completed.and_then(date_from_ymd),
-                started: started.and_then(date_from_ymd),
-                description: Token::new(
-                    Span::locate(&desc, desc_text.len()),
-                    Cow::Borrowed(desc_text),
-                ),
-            })
-        },
     );
 
-    alt((
-        map_parser(preceded(space0, is_not("\r\n")), task),
-        value(None, preceded(space0, peek(one_of("\r\n")))),
+    let (rest, parts) = parser.parse(input)?;
+    let (pos, x, priority, completed, started, description) = parts;
+
+    let description_text = description.into_fragment().trim_end();
+
+    Ok((
+        rest,
+        Task {
+            line: pos.location_line(),
+            x: x.map(|value| Token::new(Span::locate(&pos, 1), value)),
+            priority: priority.map(|(pos, uppercase, _)| {
+                Token::new(
+                    Span::locate(&pos, 3),
+                    // Safety:
+                    // The one_of combinator ensures uppercase is 65..=90.
+                    unsafe { mem::transmute::<u8, Priority>(uppercase as u8) },
+                )
+            }),
+            completed: completed.and_then(date_from_ymd),
+            started: started.and_then(date_from_ymd),
+            description: Token::new(
+                Span::locate(&description, description_text.len()),
+                Cow::Borrowed(description_text),
+            ),
+        },
     ))
 }
 
-pub fn parse_tags<'a>(offset: usize, description: &'a str) -> impl Iterator<Item = Tag<'a>> {
+pub fn tags<'a>(offset: usize, description: &'a str) -> impl Iterator<Item = Tag<'a>> {
     let typed = |ctor: fn(Token<&'a str>) -> Tag<'a>| {
         move |(pos, output): (Input<'a>, Input<'a>)| {
             ctor(Token::new(
@@ -90,15 +91,14 @@ pub fn parse_tags<'a>(offset: usize, description: &'a str) -> impl Iterator<Item
     };
 
     let parse1 = map_parser(
-        preceded(space0, word()),
+        preceded(space0, word),
         opt(alt((
-            map((tag("@"), word()), typed(Tag::Context)),
-            map((tag("+"), word()), typed(Tag::Project)),
+            map((tag("@"), word), typed(Tag::Context)),
+            map((tag("+"), word), typed(Tag::Project)),
             map(
-                separated_pair(is_not(" :"), tag(":"), word()),
+                separated_pair(is_not(" :"), tag(":"), word),
                 move |(name, value)| {
                     let len = name.len() + value.len() + 1;
-
                     Tag::Named(Token::new(
                         Span::locate_from(&name, len, offset),
                         (name.into_fragment(), value.into_fragment()),
@@ -108,7 +108,7 @@ pub fn parse_tags<'a>(offset: usize, description: &'a str) -> impl Iterator<Item
         ))),
     );
 
-    iterator(Input::new(description), parse1).flatten()
+    iterator(description.into(), parse1).flatten()
 }
 
 fn date_from_ymd(output: (Input, (i32, u32, u32))) -> Option<Token<NaiveDate>> {
@@ -138,16 +138,18 @@ where
     map_res(parser, |output| output.fragment().parse())
 }
 
-fn word<'a>() -> impl Parser<Input<'a>, Output = Input<'a>, Error = Error<'a>> {
-    take_while1(|c: char| !c.is_whitespace())
+fn word(input: Input) -> IResult<Input, Input> {
+    take_while1(|c: char| !c.is_whitespace()).parse(input)
 }
 
-fn ymd<'a>() -> impl Parser<Input<'a>, Output = (i32, u32, u32), Error = Error<'a>> {
-    (
+fn ymd(input: Input) -> IResult<Input, (i32, u32, u32)> {
+    let mut parser = (
         terminated(parse_to(take(4usize)), tag("-")),
         terminated(parse_to(take(2usize)), tag("-")),
         parse_to(take(2usize)),
-    )
+    );
+
+    parser.parse(input)
 }
 
 impl<T> Token<T> {
@@ -220,7 +222,7 @@ mod tests {
     #[test]
     fn test_parse_tags() {
         let input = "feed the tomato plants @home +garden due:2025-06-10";
-        let tags = super::parse_tags(0, input).collect::<Vec<_>>();
+        let tags = super::tags(0, input).collect::<Vec<_>>();
 
         assert_eq!(tags.len(), 3);
     }

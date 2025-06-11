@@ -1,5 +1,4 @@
 use chrono::NaiveDate;
-use nom::Parser;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display, Formatter};
@@ -65,9 +64,8 @@ impl Task<'_> {
     ///
     pub fn tags(&self) -> impl Iterator<Item = Tag<'_>> {
         let description = &self.description;
-        let offset = description.span().start();
 
-        parser::parse_tags(offset, description.value())
+        parser::tags(description.span().start(), description.value())
     }
 
     /// True if the todo starts with a lowercase "x" or has a `completed` date.
@@ -151,8 +149,8 @@ impl FromStr for Task<'static> {
     type Err = String;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        match parser::parse_task().parse(input.into()) {
-            Ok((_, Some(task))) => Ok(task.into_owned()),
+        match parser::task(input.into()) {
+            Ok((_, task)) => Ok(task.into_owned()),
             _ => Err("unexpected end of input".to_owned()), // Allocation
         }
     }
