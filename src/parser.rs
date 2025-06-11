@@ -2,12 +2,13 @@ use chrono::NaiveDate;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, take, take_while1};
 use nom::character::complete::{line_ending, one_of, space0, space1};
-use nom::combinator::{eof, iterator, map, map_opt, map_parser, map_res, opt, peek};
+use nom::combinator::{eof, iterator, map, map_parser, map_res, opt, peek, value};
 use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use nom::{IResult, Parser};
 use nom_locate::position;
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::mem;
 use std::str::FromStr;
 
 use crate::task::{Priority, Tag, Task};
@@ -36,41 +37,49 @@ pub fn from_str(value: &str) -> impl Iterator<Item = Task<'_>> {
 }
 
 pub fn parse_task<'a>() -> impl Parser<Input<'a>, Output = Option<Task<'a>>, Error = Error<'a>> {
-    let parts = (
-        map(position::<Input, _>, |pos| pos.location_line()),
-        opt(map(terminated(tag("x"), space1), |x| Span::locate(&x, 1))),
-        opt(terminated(parse_priority(), space1)),
-        opt((ymd(), opt(ymd()))),
-        alt((
-            map(preceded(space0, is_not("\r\n")), |o: Input<'a>| {
-                let value = Cow::Borrowed(o.into_fragment().trim_end());
-                Token::new(Span::locate(&o, value.len()), value)
-            }),
-            map(eof, |o| Token::new(Span::locate(&o, 0), Cow::Borrowed(""))),
-        )),
+    let task = map(
+        (
+            position,
+            opt(terminated(tag("x"), space1)),
+            opt(terminated(
+                (tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
+                space1,
+            )),
+            opt((position, terminated(ymd(), space1))),
+            opt((position, terminated(ymd(), space1))),
+            alt((preceded(space0, is_not("\r\n")), eof)),
+        ),
+        |(pos, x, priority, completed, started, desc)| {
+            let desc_text = desc.into_fragment().trim_end();
+
+            Some(Task {
+                line: pos.location_line(),
+                x: x.map(|o| Span::locate(&o, 1)),
+                priority: priority.map(|(pos, uppercase, _)| {
+                    Token::new(
+                        Span::locate(&pos, 3),
+                        // Safety:
+                        //
+                        // The one_of combinator always produces an ASCII uppercase char.
+                        // The Priority enum variants intentionally map to the ASCII
+                        // uppercase range.
+                        //
+                        unsafe { mem::transmute::<u8, Priority>(uppercase as u8) },
+                    )
+                }),
+                completed: completed.and_then(date_from_ymd),
+                started: started.and_then(date_from_ymd),
+                description: Token::new(
+                    Span::locate(&desc, desc_text.len()),
+                    Cow::Borrowed(desc_text),
+                ),
+            })
+        },
     );
 
     alt((
-        map(
-            map_parser(preceded(space0, is_not("\r\n")), parts),
-            |(line, x, priority, dates, description)| {
-                let (completed, started) = match dates {
-                    Some((d1, Some(d2))) => (Some(d1), Some(d2)),
-                    Some((d1, None)) => (None, Some(d1)),
-                    None => (None, None),
-                };
-
-                Some(Task {
-                    line,
-                    x,
-                    priority,
-                    completed,
-                    started,
-                    description,
-                })
-            },
-        ),
-        map(preceded(space0, peek(one_of("\r\n"))), |_| None),
+        map_parser(preceded(space0, is_not("\r\n")), task),
+        value(None, preceded(space0, peek(one_of("\r\n")))),
     ))
 }
 
@@ -106,23 +115,13 @@ pub fn parse_tags<'a>(offset: usize, description: &'a str) -> impl Iterator<Item
     iterator(Input::new(description), parse1).flatten()
 }
 
-fn parse_priority<'a>() -> impl Parser<Input<'a>, Output = Token<Priority>, Error = Error<'a>> {
-    map(
-        (tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
-        |(pos, uppercase, _)| {
-            let span = Span::locate(&pos, 3);
+fn date_from_ymd(output: (Input, (i32, u32, u32))) -> Option<Token<NaiveDate>> {
+    let (pos, (y, m, d)) = output;
 
-            Token::new(span, unsafe {
-                // Safety:
-                //
-                // The one_of combinator always produces an ASCII uppercase char.
-                // The Priority enum variants intentionally map to the ASCII
-                // uppercase range.
-                //
-                std::mem::transmute::<u8, Priority>(uppercase as u8)
-            })
-        },
-    )
+    Some(Token::new(
+        Span::locate(&pos, 10),
+        NaiveDate::from_ymd_opt(y, m, d)?,
+    ))
 }
 
 fn eol(input: Input) -> IResult<Input, ()> {
@@ -147,21 +146,11 @@ fn word<'a>() -> impl Parser<Input<'a>, Output = Input<'a>, Error = Error<'a>> {
     take_while1(|c: char| !c.is_whitespace())
 }
 
-fn ymd<'a>() -> impl Parser<Input<'a>, Output = Token<NaiveDate>, Error = Error<'a>> {
-    let triple = (
+fn ymd<'a>() -> impl Parser<Input<'a>, Output = (i32, u32, u32), Error = Error<'a>> {
+    (
         terminated(parse_to(take(4usize)), tag("-")),
         terminated(parse_to(take(2usize)), tag("-")),
         parse_to(take(2usize)),
-    );
-
-    map_opt(
-        (position, terminated(triple, space1)),
-        |(pos, (y, m, d))| {
-            Some(Token {
-                value: NaiveDate::from_ymd_opt(y, m, d)?,
-                span: Span::locate(&pos, 10),
-            })
-        },
     )
 }
 
