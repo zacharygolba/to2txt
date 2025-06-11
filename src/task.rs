@@ -131,15 +131,19 @@ impl<'a> Task<'a> {
 
 impl Debug for Task<'_> {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
-        struct DebugTags<'a> {
-            todo: &'a Task<'a>,
-        }
+        struct DebugTags<'a>(&'a Token<Cow<'a, str>>);
 
         impl Debug for DebugTags<'_> {
             fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-                f.debug_list().entries(self.todo.tags()).finish()
+                let Self(token) = *self;
+                let input = token.value();
+                let tags = parser::tags(token.start(), input);
+
+                f.debug_list().entries(tags).finish()
             }
         }
+
+        let description = &self.description;
 
         fmt.debug_struct("Todo")
             .field("line", &self.line)
@@ -147,8 +151,8 @@ impl Debug for Task<'_> {
             .field("priority", &self.priority)
             .field("completed", &self.completed)
             .field("started", &self.started)
-            .field("description", &self.description)
-            .field("tags", &DebugTags { todo: self })
+            .field("description", description)
+            .field("tags", &DebugTags(description))
             .finish()
     }
 }
@@ -195,24 +199,27 @@ impl FromStr for Task<'static> {
 #[cfg(feature = "serde")]
 impl Serialize for Task<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        struct SerializeTags<'a> {
-            todo: &'a Task<'a>,
-        }
+        struct SerializeTags<'a>(&'a Token<Cow<'a, str>>);
 
         impl Serialize for SerializeTags<'_> {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                serializer.collect_seq(self.todo.tags())
+                let Self(token) = *self;
+                let input = token.value();
+                let tags = parser::tags(token.start(), input);
+
+                serializer.collect_seq(tags)
             }
         }
 
         let mut state = serializer.serialize_struct("Todo", 1)?;
+        let description = &self.description;
 
         state.serialize_field("x", &self.x)?;
         state.serialize_field("priority", &self.priority)?;
         state.serialize_field("completed", &self.completed)?;
         state.serialize_field("started", &self.started)?;
-        state.serialize_field("description", &self.description)?;
-        state.serialize_field("tags", &SerializeTags { todo: &self })?;
+        state.serialize_field("description", description)?;
+        state.serialize_field("tags", &SerializeTags(description))?;
 
         state.end()
     }
