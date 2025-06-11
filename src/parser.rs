@@ -141,6 +141,22 @@ fn ymd(input: Input) -> IResult<Input, (i32, u32, u32)> {
     parser.parse(input)
 }
 
+impl Span {
+    pub(crate) fn locate(input: &Input, len: usize) -> Self {
+        let start = input.get_utf8_column() - 1;
+        Self(start, start + len)
+    }
+
+    pub(crate) fn locate_from(input: &Input, len: usize, offset: usize) -> Self {
+        let mut span = Self::locate(input, len);
+
+        span.0 += offset;
+        span.1 += offset;
+
+        span
+    }
+}
+
 impl<T> Token<T> {
     /// A reference to value of the associated item.
     ///
@@ -149,11 +165,11 @@ impl<T> Token<T> {
     }
 
     pub fn start(&self) -> usize {
-        self.span.start()
+        self.span.0
     }
 
     pub fn end(&self) -> usize {
-        self.span.end()
+        self.span.1
     }
 }
 
@@ -182,32 +198,6 @@ impl<T: PartialEq> PartialEq for Token<T> {
 impl<T: PartialOrd> PartialOrd for Token<T> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.value().partial_cmp(other.value())
-    }
-}
-
-impl Span {
-    pub fn start(&self) -> usize {
-        self.0
-    }
-
-    pub fn end(&self) -> usize {
-        self.1
-    }
-}
-
-impl Span {
-    pub(crate) fn locate(input: &Input, len: usize) -> Self {
-        let start = input.get_utf8_column() - 1;
-        Self(start, start + len)
-    }
-
-    pub(crate) fn locate_from(input: &Input, len: usize, offset: usize) -> Self {
-        let mut span = Self::locate(input, len);
-
-        span.0 += offset;
-        span.1 += offset;
-
-        span
     }
 }
 
