@@ -165,16 +165,16 @@ impl Display for Task<'_> {
             write!(f, "x ")?;
         }
 
-        if let Some(value) = priority.as_ref().map(Token::value) {
-            write!(f, "{} ", value)?;
+        if let Some(token) = priority.as_ref() {
+            write!(f, "{} ", token.value())?;
         }
 
-        if let Some(value) = completed.as_ref().map(Token::value) {
-            write!(f, "{} ", value)?;
+        if let Some(token) = completed.as_ref() {
+            write!(f, "{} ", token.value())?;
         }
 
-        if let Some(value) = started.as_ref().map(Token::value) {
-            write!(f, "{} ", value)?;
+        if let Some(token) = started.as_ref() {
+            write!(f, "{} ", token.value())?;
         }
 
         f.write_str(description.value())
