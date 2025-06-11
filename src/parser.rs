@@ -142,16 +142,18 @@ fn ymd(input: Input) -> IResult<Input, (i32, u32, u32)> {
 }
 
 impl<T> Token<T> {
-    /// The location of the associated item.
-    ///
-    pub fn span(&self) -> &Span {
-        &self.span
-    }
-
     /// A reference to value of the associated item.
     ///
     pub fn value(&self) -> &T {
         &self.value
+    }
+
+    pub fn start(&self) -> usize {
+        self.span.start()
+    }
+
+    pub fn end(&self) -> usize {
+        self.span.end()
     }
 }
 
@@ -160,7 +162,10 @@ impl<T> Token<T> {
         Self { span, value }
     }
 
-    pub(crate) fn map<U>(self, f: impl FnOnce(T) -> U) -> Token<U> {
+    pub(crate) fn map<U, F>(self, f: F) -> Token<U>
+    where
+        F: FnOnce(T) -> U,
+    {
         Token {
             value: f(self.value),
             span: self.span,
