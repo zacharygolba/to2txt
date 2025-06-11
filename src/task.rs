@@ -78,7 +78,7 @@ impl Task<'_> {
 
     /// True if the todo starts with a lowercase "x" or has a `completed` date.
     ///
-    pub fn is_complete(&self) -> bool {
+    pub fn is_done(&self) -> bool {
         matches!(
             self,
             Self { x: Some(_), .. }
