@@ -1,23 +1,29 @@
-use chrono::NaiveDate;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, take, take_while1};
 use nom::character::complete::{char, line_ending, one_of, space0, space1};
-use nom::combinator::{eof, iterator, map, map_parser, map_res, opt};
+use nom::combinator::{iterator, map, map_parser, map_res, opt, rest};
 use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use nom::{IResult, Parser};
 use nom_locate::position;
-use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::mem;
 use std::str::FromStr;
 
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
-use crate::task::{Priority, Tag, Task};
+use crate::task::{Tag, Task};
 
 type Error<'a> = nom::error::Error<Input<'a>>;
-type Input<'a> = nom_locate::LocatedSpan<&'a str>;
+
+pub(crate) type Input<'a> = nom_locate::LocatedSpan<&'a str>;
+pub(crate) type Parts<'a> = (
+    Input<'a>,
+    Option<char>,
+    Option<(Input<'a>, char, Input<'a>)>,
+    Option<(Input<'a>, (i32, u32, u32))>,
+    Option<(Input<'a>, (i32, u32, u32))>,
+    Input<'a>,
+);
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -33,10 +39,10 @@ pub struct Token<T> {
 /// Parse a todo list from the provided `&str`.
 ///
 pub fn from_str(input: &str) -> impl Iterator<Item = Task<'_>> {
-    iterator(input.into(), delimited(eol, task, eol))
+    iterator(input.into(), delimited(eol, task, eol)).flatten()
 }
 
-pub fn task(input: Input) -> IResult<Input, Task> {
+pub fn task(input: Input) -> IResult<Input, Option<Task>> {
     let mut parser = map_parser(
         is_not("\r\n"),
         (
@@ -48,36 +54,14 @@ pub fn task(input: Input) -> IResult<Input, Task> {
             )),
             opt((position, terminated(ymd, space1))),
             opt((position, terminated(ymd, space1))),
-            alt((preceded(space0, is_not("\r\n")), eof)),
+            map(preceded(space0, rest), trim_end),
         ),
     );
 
-    let (rest, parts) = parser.parse(input)?;
-    let (pos, x, priority, completed, started, description) = parts;
-
-    let description_text = description.into_fragment().trim_end();
-
-    Ok((
-        rest,
-        Task {
-            line: pos.location_line(),
-            x: x.map(|value| Token::new(Span::locate(&pos, 1), value)),
-            priority: priority.map(|(pos, uppercase, _)| {
-                Token::new(
-                    Span::locate(&pos, 3),
-                    // Safety:
-                    // The one_of combinator ensures uppercase is 65..=90.
-                    unsafe { mem::transmute::<u8, Priority>(uppercase as u8) },
-                )
-            }),
-            completed: completed.and_then(date_from_ymd),
-            started: started.and_then(date_from_ymd),
-            description: Token::new(
-                Span::locate(&description, description_text.len()),
-                Cow::Borrowed(description_text),
-            ),
-        },
-    ))
+    parser.parse(input).map(|(rest, parts)| match &parts {
+        (_, None, None, None, None, d) if d.is_empty() => (rest, None),
+        _ => (rest, Some(Task::from_parts(parts))),
+    })
 }
 
 pub fn tags<'a>(offset: usize, description: &'a str) -> impl Iterator<Item = Tag<'a>> {
@@ -111,15 +95,6 @@ pub fn tags<'a>(offset: usize, description: &'a str) -> impl Iterator<Item = Tag
     iterator(description.into(), parse1).flatten()
 }
 
-fn date_from_ymd(output: (Input, (i32, u32, u32))) -> Option<Token<NaiveDate>> {
-    let (pos, (y, m, d)) = output;
-
-    Some(Token::new(
-        Span::locate(&pos, 10),
-        NaiveDate::from_ymd_opt(y, m, d)?,
-    ))
-}
-
 fn eol(input: Input) -> IResult<Input, ()> {
     let mut rest = input;
 
@@ -136,6 +111,20 @@ where
     P: Parser<Input<'a>, Output = Input<'a>, Error = Error<'a>>,
 {
     map_res(parser, |output| output.fragment().parse())
+}
+
+fn trim_end(input: Input) -> Input {
+    // Safety:
+    // We do not changing the original offset. The returned input can always
+    // produce valid index range.
+    unsafe {
+        Input::new_from_raw_offset(
+            input.location_offset(),
+            input.location_line(),
+            input.into_fragment().trim_end(),
+            (),
+        )
+    }
 }
 
 fn word(input: Input) -> IResult<Input, Input> {
