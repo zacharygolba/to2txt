@@ -59,13 +59,13 @@ pub fn task(input: Input) -> IResult<Input, Option<Task>> {
             Some(Task {
                 line: from.location_line(),
                 x: x.map(|value| Token::new(1, &from, value)),
-                priority: priority.map(|(f, ascii, _)| {
+                priority: priority.map(|(f, uppercase, _)| {
                     Token::new(
                         3,
                         &f,
                         // Safety:
                         // The one_of combinator ensures uppercase is 65..=90.
-                        unsafe { mem::transmute::<u32, Priority>(ascii as _) },
+                        unsafe { mem::transmute::<u32, Priority>(uppercase as _) },
                     )
                 }),
                 completed_on: completed_on.and_then(date_from_ymd),
