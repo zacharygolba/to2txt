@@ -1,32 +1,23 @@
 use chrono::NaiveDate;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, take, take_while1};
-use nom::character::complete::{char, line_ending, one_of, space0, space1};
-use nom::combinator::{iterator, map, map_parser, map_res, opt, rest};
+use nom::character::complete::{char, line_ending, space0, space1};
+use nom::character::streaming::one_of;
+use nom::combinator::{iterator, map, map_parser, map_res, opt, rest, value};
 use nom::sequence::{delimited, preceded, separated_pair, terminated};
 use nom::{IResult, Parser};
 use nom_locate::position;
 use std::borrow::Cow;
-use std::cmp::Ordering;
 use std::mem;
 use std::str::FromStr;
 
 #[cfg(feature = "serde")]
 use serde::Serialize;
 
-use crate::Priority;
-use crate::task::{Tag, Task};
+use crate::task::{Priority, Tag, Task};
 
 type Error<'a> = nom::error::Error<Input<'a>>;
 type Input<'a> = nom_locate::LocatedSpan<&'a str>;
-type Parts<'a> = (
-    Input<'a>,
-    Option<char>,
-    Option<(Input<'a>, char, Input<'a>)>,
-    Option<(Input<'a>, (i32, u32, u32))>,
-    Option<(Input<'a>, (i32, u32, u32))>,
-    Input<'a>,
-);
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -35,8 +26,8 @@ pub struct Span(usize, usize);
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Debug)]
 pub struct Token<T> {
-    pub(crate) value: T,
-    pub(crate) span: Span,
+    value: T,
+    span: Span,
 }
 
 /// Parse a todo list from the provided `&str`.
@@ -50,7 +41,7 @@ pub fn task(input: Input) -> IResult<Input, Option<Task>> {
         is_not("\r\n"),
         (
             preceded(space0, position),
-            opt(terminated(char('x'), space1)),
+            opt(value(true, terminated(char('x'), space1))),
             opt(terminated(
                 (tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
                 space1,
@@ -63,17 +54,38 @@ pub fn task(input: Input) -> IResult<Input, Option<Task>> {
 
     parser.parse(input).map(|(rest, parts)| match &parts {
         (_, None, None, None, None, description) if description.is_empty() => (rest, None),
-        _ => (rest, Some(task_from_parts(parts))),
+        (from, x, priority, completed_on, started_on, description) => (
+            rest,
+            Some(Task {
+                line: from.location_line(),
+                x: x.map(|value| Token::new(1, &from, value)),
+                priority: priority.map(|(f, ascii, _)| {
+                    Token::new(
+                        3,
+                        &f,
+                        // Safety:
+                        // The one_of combinator ensures uppercase is 65..=90.
+                        unsafe { mem::transmute::<u32, Priority>(ascii as _) },
+                    )
+                }),
+                completed_on: completed_on.and_then(date_from_ymd),
+                started_on: started_on.and_then(date_from_ymd),
+                description: Token::new(
+                    description.len(),
+                    &description,
+                    Cow::Borrowed(description.into_fragment()),
+                ),
+            }),
+        ),
     })
 }
 
 pub fn tags<'a>(offset: usize, description: &'a str) -> impl Iterator<Item = Tag<'a>> {
     let typed = |ctor: fn(Token<&'a str>) -> Tag<'a>| {
-        move |(pos, output): (Input<'a>, Input<'a>)| {
-            ctor(Token::new(
-                Span::locate_from(&pos, output.len() + 1, offset),
-                output.into_fragment(),
-            ))
+        move |(from, output): (Input<'a>, Input<'a>)| {
+            let len = output.len() + 1;
+            let value = output.into_fragment();
+            ctor(Token::new_with_offset(len, offset, &from, value))
         }
     };
 
@@ -84,12 +96,11 @@ pub fn tags<'a>(offset: usize, description: &'a str) -> impl Iterator<Item = Tag
             map((tag("+"), word), typed(Tag::Project)),
             map(
                 separated_pair(is_not(" :"), tag(":"), word),
-                move |(name, value)| {
-                    let len = name.len() + value.len() + 1;
-                    Tag::Named(Token::new(
-                        Span::locate_from(&name, len, offset),
-                        (name.into_fragment(), value.into_fragment()),
-                    ))
+                move |(k, v)| {
+                    Tag::Named(
+                        Token::new_with_offset(k.len(), offset, &k, k.into_fragment()),
+                        Token::new_with_offset(v.len(), offset, &v, v.into_fragment()),
+                    )
                 },
             ),
         ))),
@@ -99,12 +110,10 @@ pub fn tags<'a>(offset: usize, description: &'a str) -> impl Iterator<Item = Tag
 }
 
 fn date_from_ymd(output: (Input, (i32, u32, u32))) -> Option<Token<NaiveDate>> {
-    let (pos, (y, m, d)) = output;
+    let (from, (y, m, d)) = output;
+    let value = NaiveDate::from_ymd_opt(y, m, d)?;
 
-    Some(Token::new(
-        Span::locate(&pos, 10),
-        NaiveDate::from_ymd_opt(y, m, d)?,
-    ))
+    Some(Token::new(10, &from, value))
 }
 
 fn eol(input: Input) -> IResult<Input, ()> {
@@ -123,29 +132,6 @@ where
     P: Parser<Input<'a>, Output = Input<'a>, Error = Error<'a>>,
 {
     map_res(parser, |output| output.fragment().parse())
-}
-
-fn task_from_parts(parts: Parts) -> Task {
-    let (pos, x, priority, completed_on, started_on, description) = parts;
-
-    Task {
-        line: pos.location_line(),
-        x: x.map(|value| Token::new(Span::locate(&pos, 1), value)),
-        priority: priority.map(|(pos, uppercase, _)| {
-            Token::new(
-                Span::locate(&pos, 3),
-                // Safety:
-                // The one_of combinator ensures uppercase is 65..=90.
-                unsafe { mem::transmute::<u8, Priority>(uppercase as u8) },
-            )
-        }),
-        completed_on: completed_on.and_then(date_from_ymd),
-        started_on: started_on.and_then(date_from_ymd),
-        description: Token::new(
-            Span::locate(&description, description.len()),
-            Cow::Borrowed(description.into_fragment()),
-        ),
-    }
 }
 
 fn trim_end(input: Input) -> Input {
@@ -177,42 +163,38 @@ fn ymd(input: Input) -> IResult<Input, (i32, u32, u32)> {
 }
 
 impl Span {
-    pub(crate) fn locate(input: &Input, len: usize) -> Self {
-        let start = input.get_utf8_column() - 1;
-        Self(start, start + len)
-    }
-
-    pub(crate) fn locate_from(input: &Input, len: usize, offset: usize) -> Self {
-        let mut span = Self::locate(input, len);
-
-        span.0 += offset;
-        span.1 += offset;
-
-        span
-    }
-}
-
-impl<T> Token<T> {
-    /// A reference to value of the associated item.
-    ///
-    pub fn value(&self) -> &T {
-        &self.value
-    }
-
     pub fn start(&self) -> usize {
-        self.span.0
+        self.0
     }
 
     pub fn end(&self) -> usize {
-        self.span.1
+        self.1
     }
 }
 
 impl<T> Token<T> {
-    pub(crate) fn new(span: Span, value: T) -> Self {
-        Self { span, value }
+    pub fn span(&self) -> &Span {
+        &self.span
+    }
+}
+
+impl<T: Copy> Token<T> {
+    pub fn value(&self) -> &T {
+        &self.value
+    }
+}
+
+impl Token<Cow<'_, str>> {
+    pub fn as_str(&self) -> &str {
+        self.value.as_ref()
     }
 
+    pub fn into_string(self) -> String {
+        self.value.into_owned()
+    }
+}
+
+impl<T> Token<T> {
     pub(crate) fn map<U, F>(self, f: F) -> Token<U>
     where
         F: FnOnce(T) -> U,
@@ -222,17 +204,22 @@ impl<T> Token<T> {
             span: self.span,
         }
     }
-}
 
-impl<T: PartialEq> PartialEq for Token<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.value().eq(other.value())
+    fn new_with_offset(len: usize, offset: usize, from: &Input, value: T) -> Self {
+        let mut token = Self::new(len, from, value);
+        let Span(start, end) = &mut token.span;
+
+        *start += offset;
+        *end += offset;
+
+        token
     }
-}
 
-impl<T: PartialOrd> PartialOrd for Token<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.value().partial_cmp(other.value())
+    fn new(len: usize, from: &Input, value: T) -> Self {
+        let start = from.get_utf8_column() - 1;
+        let span = Span(start, start + len);
+
+        Self { value, span }
     }
 }
 

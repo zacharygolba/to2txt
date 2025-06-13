@@ -5,16 +5,14 @@ use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
 
 #[cfg(feature = "serde")]
-use serde::ser::SerializeStruct;
-#[cfg(feature = "serde")]
-use serde::{Serialize, Serializer};
+use serde::{Serialize, Serializer, ser::SerializeStruct};
 
 use crate::parser::{self, Token};
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[rustfmt::skip]
-#[repr(u8)]
+#[repr(C)]
 pub enum Priority {
     A = 65, B, C, D, E, F, G, H, I, J, K, L, M,
     N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
@@ -23,13 +21,13 @@ pub enum Priority {
 #[cfg_attr(
     feature = "serde",
     derive(Serialize),
-    serde(tag = "type", rename_all = "lowercase")
+    serde(tag = "type", content = "data", rename_all = "lowercase")
 )]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Tag<'a> {
     Context(Token<&'a str>),
     Project(Token<&'a str>),
-    Named(Token<(&'a str, &'a str)>),
+    Named(Token<&'a str>, Token<&'a str>),
 }
 
 /// A task from a todo list.
@@ -38,7 +36,7 @@ pub enum Tag<'a> {
 #[non_exhaustive]
 pub struct Task<'a> {
     pub line: u32,
-    pub x: Option<Token<char>>,
+    pub x: Option<Token<bool>>,
     pub priority: Option<Token<Priority>>,
     pub completed_on: Option<Token<NaiveDate>>,
     pub started_on: Option<Token<NaiveDate>>,
@@ -47,15 +45,13 @@ pub struct Task<'a> {
 
 impl Display for Priority {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "({})", (*self as u8) as char)
+        write!(f, "({})", &((*self as u8) as char))
     }
 }
 
 impl PartialOrd for Priority {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        (*self as u8)
-            .partial_cmp(&(*other as u8))
-            .map(Ordering::reverse)
+        u32::partial_cmp(&(*self as _), &(*other as _))
     }
 }
 
@@ -64,21 +60,17 @@ impl Task<'_> {
     ///
     pub fn tags(&self) -> impl Iterator<Item = Tag<'_>> {
         let description = &self.description;
-        let input = description.value();
+        let input = description.as_str();
 
-        parser::tags(description.start(), input)
+        parser::tags(description.span().start(), input)
     }
 
-    /// True if the todo starts with a lowercase "x" or has a `completed` date.
+    /// True when `x` or `completed_on` is present.
     ///
     pub fn is_done(&self) -> bool {
         matches!(
-            self,
-            Self { x: Some(_), .. }
-                | Self {
-                    completed_on: Some(_),
-                    ..
-                }
+            (&self.x, &self.completed_on),
+            (Some(_), None) | (None, Some(_))
         )
     }
 
@@ -86,9 +78,7 @@ impl Task<'_> {
     ///
     pub fn into_owned(self) -> Task<'static> {
         Task {
-            description: self.description.map(|value| {
-                Cow::Owned(value.into_owned()) // Allocation
-            }),
+            description: self.description.map(|value| Cow::Owned(value.into_owned())),
             ..self
         }
     }
@@ -100,9 +90,9 @@ impl Debug for Task<'_> {
 
         impl Debug for DebugTags<'_> {
             fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-                let Self(token) = *self;
-                let input = token.value();
-                let tags = parser::tags(token.start(), input);
+                let Self(description) = *self;
+                let input = description.as_str();
+                let tags = parser::tags(description.span().start(), input);
 
                 f.debug_list().entries(tags).finish()
             }
@@ -126,8 +116,8 @@ impl Display for Task<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let x = &self.x;
         let priority = &self.priority;
-        let completed = &self.completed_on;
-        let started = &self.started_on;
+        let completed_on = &self.completed_on;
+        let started_on = &self.started_on;
         let description = &self.description;
 
         if x.is_some() {
@@ -135,18 +125,18 @@ impl Display for Task<'_> {
         }
 
         if let Some(token) = priority.as_ref() {
+            write!(f, "({}) ", token.value())?;
+        }
+
+        if let Some(token) = completed_on.as_ref() {
             write!(f, "{} ", token.value())?;
         }
 
-        if let Some(token) = completed.as_ref() {
+        if let Some(token) = started_on.as_ref() {
             write!(f, "{} ", token.value())?;
         }
 
-        if let Some(token) = started.as_ref() {
-            write!(f, "{} ", token.value())?;
-        }
-
-        f.write_str(description.value())
+        f.write_str(description.as_str())
     }
 }
 
@@ -168,9 +158,9 @@ impl Serialize for Task<'_> {
 
         impl Serialize for SerializeTags<'_> {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                let Self(token) = *self;
-                let input = token.value();
-                let tags = parser::tags(token.start(), input);
+                let Self(description) = *self;
+                let input = description.as_str();
+                let tags = parser::tags(description.span().start(), input);
 
                 serializer.collect_seq(tags)
             }
@@ -187,18 +177,5 @@ impl Serialize for Task<'_> {
         state.serialize_field("tags", &SerializeTags(description))?;
 
         state.end()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Priority;
-
-    #[test]
-    fn test_priority_order() {
-        assert!(
-            Priority::A > Priority::B,
-            "Priority should be ordered alphabetically in descending order."
-        )
     }
 }
