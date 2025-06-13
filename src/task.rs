@@ -12,7 +12,7 @@ use crate::parser::{self, Token};
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[rustfmt::skip]
-#[repr(C)]
+#[repr(u32)]
 pub enum Priority {
     A = 65, B, C, D, E, F, G, H, I, J, K, L, M,
     N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
