@@ -60,9 +60,7 @@ impl Task<'_> {
     ///
     pub fn tags(&self) -> impl Iterator<Item = Tag<'_>> {
         let description = &self.description;
-        let input = description.as_str();
-
-        parser::tags(description.start(), input)
+        parser::tags(description.start(), description.as_str())
     }
 
     /// True when `x` or `completed_on` is present.
@@ -91,8 +89,7 @@ impl Debug for Task<'_> {
         impl Debug for DebugTags<'_> {
             fn fmt(&self, f: &mut Formatter) -> fmt::Result {
                 let Self(description) = *self;
-                let input = description.as_str();
-                let tags = parser::tags(description.start(), input);
+                let tags = parser::tags(description.start(), description.as_str());
 
                 f.debug_list().entries(tags).finish()
             }
@@ -118,15 +115,15 @@ impl Display for Task<'_> {
             write!(f, "x ")?;
         }
 
-        if let Some(token) = self.priority.as_ref() {
+        if let Some(token) = &self.priority {
             write!(f, "({}) ", token.value())?;
         }
 
-        if let Some(token) = self.completed_on.as_ref() {
+        if let Some(token) = &self.completed_on {
             write!(f, "{} ", token.value())?;
         }
 
-        if let Some(token) = self.started_on.as_ref() {
+        if let Some(token) = &self.started_on {
             write!(f, "{} ", token.value())?;
         }
 
@@ -153,8 +150,7 @@ impl Serialize for Task<'_> {
         impl Serialize for SerializeTags<'_> {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
                 let Self(description) = *self;
-                let input = description.as_str();
-                let tags = parser::tags(description.start(), input);
+                let tags = parser::tags(description.start(), description.as_str());
 
                 serializer.collect_seq(tags)
             }

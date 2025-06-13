@@ -211,9 +211,11 @@ impl<T> Token<T> {
 
     fn new(len: usize, from: &Input, value: T) -> Self {
         let start = from.get_utf8_column() - 1;
-        let span = Span(start, start + len);
 
-        Self { value, span }
+        Self {
+            value,
+            span: Span(start, start + len),
+        }
     }
 
     fn span(&self) -> &Span {
