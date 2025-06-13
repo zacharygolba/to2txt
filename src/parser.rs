@@ -52,7 +52,7 @@ pub fn task(input: Input) -> IResult<Input, Option<Task>> {
         ),
     );
 
-    parser.parse(input).map(|(rest, parts)| match &parts {
+    parser.parse(input).map(|(rest, parts)| match parts {
         (_, None, None, None, None, description) if description.is_empty() => (rest, None),
         (from, x, priority, completed_on, started_on, description) => (
             rest,
