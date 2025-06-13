@@ -162,19 +162,13 @@ fn ymd(input: Input) -> IResult<Input, (i32, u32, u32)> {
     parser.parse(input)
 }
 
-impl Span {
+impl<T> Token<T> {
     pub fn start(&self) -> usize {
-        self.0
+        self.span().0
     }
 
     pub fn end(&self) -> usize {
-        self.1
-    }
-}
-
-impl<T> Token<T> {
-    pub fn span(&self) -> &Span {
-        &self.span
+        self.span().1
     }
 }
 
@@ -220,6 +214,10 @@ impl<T> Token<T> {
         let span = Span(start, start + len);
 
         Self { value, span }
+    }
+
+    fn span(&self) -> &Span {
+        &self.span
     }
 }
 

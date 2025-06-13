@@ -62,7 +62,7 @@ impl Task<'_> {
         let description = &self.description;
         let input = description.as_str();
 
-        parser::tags(description.span().start(), input)
+        parser::tags(description.start(), input)
     }
 
     /// True when `x` or `completed_on` is present.
@@ -92,7 +92,7 @@ impl Debug for Task<'_> {
             fn fmt(&self, f: &mut Formatter) -> fmt::Result {
                 let Self(description) = *self;
                 let input = description.as_str();
-                let tags = parser::tags(description.span().start(), input);
+                let tags = parser::tags(description.start(), input);
 
                 f.debug_list().entries(tags).finish()
             }
@@ -114,29 +114,23 @@ impl Debug for Task<'_> {
 
 impl Display for Task<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let x = &self.x;
-        let priority = &self.priority;
-        let completed_on = &self.completed_on;
-        let started_on = &self.started_on;
-        let description = &self.description;
-
-        if x.is_some() {
+        if self.x.is_some() {
             write!(f, "x ")?;
         }
 
-        if let Some(token) = priority.as_ref() {
+        if let Some(token) = self.priority.as_ref() {
             write!(f, "({}) ", token.value())?;
         }
 
-        if let Some(token) = completed_on.as_ref() {
+        if let Some(token) = self.completed_on.as_ref() {
             write!(f, "{} ", token.value())?;
         }
 
-        if let Some(token) = started_on.as_ref() {
+        if let Some(token) = self.started_on.as_ref() {
             write!(f, "{} ", token.value())?;
         }
 
-        f.write_str(description.as_str())
+        f.write_str(self.description.as_str())
     }
 }
 
@@ -160,7 +154,7 @@ impl Serialize for Task<'_> {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
                 let Self(description) = *self;
                 let input = description.as_str();
-                let tags = parser::tags(description.span().start(), input);
+                let tags = parser::tags(description.start(), input);
 
                 serializer.collect_seq(tags)
             }
