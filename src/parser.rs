@@ -163,18 +163,16 @@ fn ymd(input: Input) -> IResult<Input, (i32, u32, u32)> {
 }
 
 impl<T> Token<T> {
+    pub fn value(&self) -> &T {
+        &self.value
+    }
+
     pub fn start(&self) -> usize {
         self.span().0
     }
 
     pub fn end(&self) -> usize {
         self.span().1
-    }
-}
-
-impl<T: Copy> Token<T> {
-    pub fn value(&self) -> &T {
-        &self.value
     }
 }
 
