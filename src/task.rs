@@ -25,22 +25,21 @@ pub enum Priority {
 )]
 #[derive(Clone, Debug)]
 pub enum Tag<'a> {
-    Context(Token<&'a str>),
-    Project(Token<&'a str>),
-    Named(Token<&'a str>, Token<&'a str>),
+    Context(&'a str),
+    Project(&'a str),
+    Named(&'a str, &'a str),
 }
 
 /// A task from a todo list.
 ///
 #[derive(Clone)]
-#[non_exhaustive]
 pub struct Task<'a> {
-    pub line: u32,
-    pub x: Option<Token<bool>>,
-    pub priority: Option<Token<Priority>>,
-    pub completed_on: Option<Token<NaiveDate>>,
-    pub started_on: Option<Token<NaiveDate>>,
-    pub description: Token<Cow<'a, str>>,
+    pub(crate) line: u32,
+    pub(crate) x: Option<Token<bool>>,
+    pub(crate) priority: Option<Token<Priority>>,
+    pub(crate) completed_on: Option<Token<NaiveDate>>,
+    pub(crate) started_on: Option<Token<NaiveDate>>,
+    pub(crate) description: Token<Cow<'a, str>>,
 }
 
 impl Display for Priority {
@@ -56,34 +55,37 @@ impl PartialOrd for Priority {
 }
 
 impl Task<'_> {
+    pub fn line(&self) -> u32 {
+        self.line
+    }
+
     pub fn x(&self) -> bool {
         self.x.is_some()
     }
 
-    pub fn priority(&self) -> Option<&Priority> {
-        self.priority.as_ref().map(|t| t.value())
+    pub fn priority(&self) -> Option<&Token<Priority>> {
+        self.priority.as_ref()
     }
 
-    pub fn completed_on(&self) -> Option<&NaiveDate> {
-        self.completed_on.as_ref().map(|t| t.value())
+    pub fn completed_on(&self) -> Option<&Token<NaiveDate>> {
+        self.completed_on.as_ref()
     }
 
-    pub fn started_on(&self) -> Option<&NaiveDate> {
-        self.started_on.as_ref().map(|t| t.value())
+    pub fn started_on(&self) -> Option<&Token<NaiveDate>> {
+        self.started_on.as_ref()
     }
 
-    pub fn description(&self) -> &str {
-        self.description.as_str()
+    pub fn description(&self) -> &Token<Cow<str>> {
+        &self.description
     }
 
     /// Returns an iterator over the tags in the todo's description.
     ///
-    pub fn tags(&self) -> impl Iterator<Item = Tag<'_>> {
-        let description = &self.description;
-        parser::tags(description.start(), description.as_str())
+    pub fn tags(&self) -> impl Iterator<Item = Token<Tag<'_>>> {
+        parser::tags(self.description.as_input(self.line))
     }
 
-    /// True when `x` or `completed_on` is present.
+    /// True when `x` is some or `completed_on` is some.
     ///
     pub fn is_done(&self) -> bool {
         matches!(
@@ -104,12 +106,12 @@ impl Task<'_> {
 
 impl Debug for Task<'_> {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
-        struct DebugTags<'a>(&'a Token<Cow<'a, str>>);
+        struct DebugTags<'a>(u32, &'a Token<Cow<'a, str>>);
 
         impl Debug for DebugTags<'_> {
             fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-                let Self(description) = *self;
-                let tags = parser::tags(description.start(), description.as_str());
+                let Self(line, description) = *self;
+                let tags = parser::tags(description.as_input(line));
 
                 f.debug_list().entries(tags).finish()
             }
@@ -124,7 +126,7 @@ impl Debug for Task<'_> {
             .field("completed_on", &self.completed_on)
             .field("started_on", &self.started_on)
             .field("description", description)
-            .field("tags", &DebugTags(description))
+            .field("tags", &DebugTags(self.line, description))
             .finish()
     }
 }
@@ -135,16 +137,16 @@ impl Display for Task<'_> {
             write!(f, "x ")?;
         }
 
-        if let Some(value) = self.priority() {
-            write!(f, "({}) ", value)?;
+        if let Some(token) = self.priority() {
+            write!(f, "({}) ", token.value())?;
         }
 
-        if let Some(value) = self.completed_on() {
-            write!(f, "{} ", value)?;
+        if let Some(token) = self.completed_on() {
+            write!(f, "{} ", token.value())?;
         }
 
-        if let Some(value) = self.started_on() {
-            write!(f, "{} ", value)?;
+        if let Some(token) = self.started_on() {
+            write!(f, "{} ", token.value())?;
         }
 
         f.write_str(self.description.as_str())
@@ -155,8 +157,8 @@ impl FromStr for Task<'static> {
     type Err = String;
 
     fn from_str(input: &str) -> Result<Self, Self::Err> {
-        match parser::task(input.into()) {
-            Ok((_, Some(task))) => Ok(task.into_owned()),
+        match parser::task1(input.into()) {
+            Ok((_, task)) => Ok(task.into_owned()),
             _ => Err("unexpected end of input".to_owned()), // Allocation
         }
     }
@@ -165,15 +167,16 @@ impl FromStr for Task<'static> {
 #[cfg(feature = "serde")]
 impl Serialize for Task<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        struct Description<'a>(&'a str);
-        struct Tags<'a>(&'a str);
+        struct Description<'a>(u32, &'a Token<Cow<'a, str>>);
+        struct Tags<'a>(u32, &'a Token<Cow<'a, str>>);
 
         impl Serialize for Description<'_> {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+                let Self(line, token) = *self;
                 let mut state = serializer.serialize_struct("Description", 2)?;
 
-                state.serialize_field("text", self.0)?;
-                state.serialize_field("tags", &Tags(self.0))?;
+                state.serialize_field("text", token)?;
+                state.serialize_field("tags", &Tags(line, token))?;
 
                 state.end()
             }
@@ -181,7 +184,10 @@ impl Serialize for Task<'_> {
 
         impl Serialize for Tags<'_> {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                serializer.collect_seq(parser::tags(0, &self.0))
+                let Self(line, token) = *self;
+                let tags = parser::tags(token.as_input(line));
+
+                serializer.collect_seq(tags)
             }
         }
 
@@ -191,7 +197,7 @@ impl Serialize for Task<'_> {
         state.serialize_field("priority", &self.priority())?;
         state.serialize_field("started_on", &self.started_on())?;
         state.serialize_field("completed_on", &self.completed_on())?;
-        state.serialize_field("description", &Description(self.description()))?;
+        state.serialize_field("description", &Description(self.line, &self.description))?;
 
         state.end()
     }
