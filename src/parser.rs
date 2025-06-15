@@ -223,13 +223,17 @@ impl Token<Cow<'_, str>> {
         self.value.into_owned()
     }
 
-    pub(crate) fn as_input(&self, line: u32) -> Text {
+    pub(crate) fn as_input(&self, line: u32) -> Text<'_> {
         let fragment = self.as_str();
-        let offset = self.span().start();
+        let span = self.span();
 
         unsafe {
             // Safety:
-            Text::new_from_raw_offset(offset, line, fragment, ())
+            //
+            // Any span produced from the following type will be >=
+            // span.start() and <= span.end().
+            //
+            Text::new_from_raw_offset(span.start(), line, fragment, ())
         }
     }
 }
