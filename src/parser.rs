@@ -184,6 +184,7 @@ impl Span {
 
     /// The length in bytes of the token.
     ///
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.len
     }
@@ -308,9 +309,9 @@ mod tests {
 
     #[test]
     fn test_from_str() {
-        assert_eq!(super::from_str("feed tomato plants".into()).count(), 1);
+        assert_eq!(super::from_str("feed tomato plants").count(), 1);
         assert_eq!(
-            super::from_str("feed tomato plants\n  water palm\nfeed monstera".into()).count(),
+            super::from_str("feed tomato plants\n  water palm\nfeed monstera").count(),
             3
         );
     }
