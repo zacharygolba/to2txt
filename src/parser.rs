@@ -41,19 +41,19 @@ pub fn from_str(input: &str) -> impl Iterator<Item = Task<'_>> {
 
 pub fn task1(input: Text) -> IResult<Text, Task> {
     let parts = (
-        map(position, |output: Text| output.location_line()),
+        position,
         opt(xspace1(map(tag("x"), |x| Token {
             value: true,
             span: Span::new(1, &x),
         }))),
-        opt(map(
-            xspace1((tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")"))),
+        opt(xspace1(map(
+            (tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
             |(open, uppercase, _)| Token {
                 // Safety: The one_of combinator ensures uppercase is 65..=90.
                 value: unsafe { mem::transmute::<u32, Priority>(uppercase as _) },
                 span: Span::new(3, &open),
             },
-        )),
+        ))),
         opt((xspace1(date), opt(xspace1(date)))),
         map(rest, |output: Text| {
             let value = Cow::Borrowed(output.fragment().trim_ascii_end());
@@ -65,16 +65,17 @@ pub fn task1(input: Text) -> IResult<Text, Task> {
 
     let mut parser = map(
         map_parser(not_line_ending, parts),
-        |(line, x, priority, dates, description)| {
+        |(start, x, priority, dates, description)| {
             let (started_on, completed_on) = match dates {
                 Some((d1, d2 @ Some(_))) => (d2, Some(d1)),
                 Some((d1, None)) => (Some(d1), None),
                 None => (None, None),
             };
+            let line = start.location_line();
 
             Task {
-                line,
                 x,
+                line,
                 priority,
                 completed_on,
                 started_on,
@@ -163,6 +164,32 @@ where
 }
 
 impl Span {
+    /// The UTF-8 column number of the token.
+    ///
+    pub fn column(&self) -> usize {
+        self.column
+    }
+
+    /// The index of the first byte of the token.
+    ///
+    pub fn start(&self) -> usize {
+        self.start
+    }
+
+    /// The index of the last byte of the token.
+    ///
+    pub fn end(&self) -> usize {
+        self.start() + self.len()
+    }
+
+    /// The length in bytes of the token.
+    ///
+    pub fn len(&self) -> usize {
+        self.len
+    }
+}
+
+impl Span {
     fn new(len: usize, source: &Text) -> Self {
         Self {
             column: source.get_utf8_column(),
@@ -179,28 +206,10 @@ impl<T> Token<T> {
         &self.value
     }
 
-    /// The UTF-8 column number of the token.
+    /// A reference to the location of the token in the parser input.
     ///
-    pub fn column(&self) -> usize {
-        self.span.column
-    }
-
-    /// The index of the first byte of the token.
-    ///
-    pub fn start(&self) -> usize {
-        self.span.start
-    }
-
-    /// The index of the last byte of the token.
-    ///
-    pub fn end(&self) -> usize {
-        self.start() + self.len()
-    }
-
-    /// The length in bytes of the token.
-    ///
-    pub fn len(&self) -> usize {
-        self.span.len
+    pub fn span(&self) -> &Span {
+        &self.span
     }
 }
 
@@ -215,7 +224,7 @@ impl Token<Cow<'_, str>> {
 
     pub(crate) fn as_input(&self, line: u32) -> Text {
         let fragment = self.as_str();
-        let offset = self.start();
+        let offset = self.span().start();
 
         unsafe {
             // Safety:
@@ -268,27 +277,30 @@ mod tests {
 
         {
             let description = &first.description;
+            let span = description.span();
 
             assert_eq!(
-                INPUT.get(description.start()..description.len()),
+                INPUT.get(span.start()..span.end()),
                 Some("feed tomato plants"),
             );
         }
 
         {
             let description = &second.description;
+            let span = description.span();
 
             assert_eq!(
-                INPUT.get(description.start()..description.end()),
+                INPUT.get(span.start()..span.end()),
                 Some("write tests for +to2txt"),
             );
         }
 
         {
             let description = &third.description;
+            let span = description.span();
 
             assert_eq!(
-                INPUT.get(description.start()..description.end()),
+                INPUT.get(span.start()..span.end()),
                 Some("deploy repl example to vercel +to2txt"),
             );
         }

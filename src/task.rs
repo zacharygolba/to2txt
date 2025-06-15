@@ -33,13 +33,14 @@ pub enum Tag<'a> {
 /// A task from a todo list.
 ///
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct Task<'a> {
-    pub(crate) line: u32,
-    pub(crate) x: Option<Token<bool>>,
-    pub(crate) priority: Option<Token<Priority>>,
-    pub(crate) completed_on: Option<Token<NaiveDate>>,
-    pub(crate) started_on: Option<Token<NaiveDate>>,
-    pub(crate) description: Token<Cow<'a, str>>,
+    pub x: Option<Token<bool>>,
+    pub line: u32,
+    pub priority: Option<Token<Priority>>,
+    pub completed_on: Option<Token<NaiveDate>>,
+    pub started_on: Option<Token<NaiveDate>>,
+    pub description: Token<Cow<'a, str>>,
 }
 
 impl Display for Priority {
@@ -50,36 +51,42 @@ impl Display for Priority {
 
 impl PartialOrd for Priority {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        u32::partial_cmp(&(*self as _), &(*other as _))
+        Some(u32::partial_cmp(&(*self as _), &(*other as _))?.reverse())
     }
 }
 
 impl Task<'_> {
-    pub fn line(&self) -> u32 {
-        self.line
-    }
-
+    /// True when the task starts with a "x".
+    ///
     pub fn x(&self) -> bool {
         self.x.is_some()
     }
 
-    pub fn priority(&self) -> Option<&Token<Priority>> {
-        self.priority.as_ref()
+    /// The line number of the task.
+    ///
+    pub fn line(&self) -> u32 {
+        self.line
     }
 
-    pub fn completed_on(&self) -> Option<&Token<NaiveDate>> {
-        self.completed_on.as_ref()
+    pub fn priority(&self) -> Option<&Priority> {
+        self.priority.as_ref().map(Token::value)
     }
 
-    pub fn started_on(&self) -> Option<&Token<NaiveDate>> {
-        self.started_on.as_ref()
+    pub fn completed_on(&self) -> Option<&NaiveDate> {
+        self.completed_on.as_ref().map(Token::value)
     }
 
-    pub fn description(&self) -> &Token<Cow<str>> {
-        &self.description
+    pub fn started_on(&self) -> Option<&NaiveDate> {
+        self.started_on.as_ref().map(Token::value)
     }
 
-    /// Returns an iterator over the tags in the todo's description.
+    /// A str to the task's description text.
+    ///
+    pub fn description(&self) -> &str {
+        self.description.as_str()
+    }
+
+    /// An iterator over the tags in the todo's description.
     ///
     pub fn tags(&self) -> impl Iterator<Item = Token<Tag<'_>>> {
         parser::tags(self.description.as_input(self.line))
@@ -120,8 +127,8 @@ impl Debug for Task<'_> {
         let description = &self.description;
 
         fmt.debug_struct("Todo")
-            .field("line", &self.line)
             .field("x", &self.x)
+            .field("line", &self.line)
             .field("priority", &self.priority)
             .field("completed_on", &self.completed_on)
             .field("started_on", &self.started_on)
@@ -137,16 +144,16 @@ impl Display for Task<'_> {
             write!(f, "x ")?;
         }
 
-        if let Some(token) = self.priority() {
-            write!(f, "({}) ", token.value())?;
+        if let Some(priority) = self.priority() {
+            write!(f, "{} ", priority)?;
         }
 
-        if let Some(token) = self.completed_on() {
-            write!(f, "{} ", token.value())?;
+        if let Some(completed_on) = self.completed_on() {
+            write!(f, "{} ", completed_on)?;
         }
 
-        if let Some(token) = self.started_on() {
-            write!(f, "{} ", token.value())?;
+        if let Some(started_on) = self.started_on() {
+            write!(f, "{} ", started_on)?;
         }
 
         f.write_str(self.description.as_str())
