@@ -92,7 +92,7 @@ impl Task<'_> {
         parser::tags(self.description.as_input(self.line))
     }
 
-    /// True when `x` is some or `completed_on` is some.
+    /// True when `x` is some or `finished_on` is some.
     ///
     pub fn is_done(&self) -> bool {
         matches!(

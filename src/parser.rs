@@ -66,7 +66,7 @@ pub fn task1(input: Text) -> IResult<Text, Task> {
     let mut parser = map(
         map_parser(not_line_ending, parts),
         |(start, x, priority, dates, description)| {
-            let (started_on, completed_on) = match dates {
+            let (started_on, finished_on) = match dates {
                 Some((d1, d2 @ Some(_))) => (d2, Some(d1)),
                 Some((d1, None)) => (Some(d1), None),
                 None => (None, None),
@@ -77,7 +77,7 @@ pub fn task1(input: Text) -> IResult<Text, Task> {
                 x,
                 line,
                 priority,
-                finished_on: completed_on,
+                finished_on,
                 started_on,
                 description,
             }
