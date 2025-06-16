@@ -54,7 +54,8 @@ pub fn task1(input: Text) -> IResult<Text, Task> {
                 span: Span::new(3, &open),
             },
         ))),
-        opt((xspace1(date), opt(xspace1(date)))),
+        opt(xspace1(date)),
+        opt(xspace1(date)),
         map(rest, |output: Text| {
             let value = Cow::Borrowed(output.fragment().trim_ascii_end());
             let span = Span::new(value.len(), &output);
@@ -65,13 +66,12 @@ pub fn task1(input: Text) -> IResult<Text, Task> {
 
     let mut parser = map(
         map_parser(not_line_ending, parts),
-        |(start, x, priority, dates, description)| {
-            let (started_on, finished_on) = match dates {
-                Some((d1, d2 @ Some(_))) => (d2, Some(d1)),
-                Some((d1, None)) => (Some(d1), None),
-                None => (None, None),
-            };
+        |(start, x, priority, mut finished_on, mut started_on, description)| {
             let line = start.location_line();
+
+            if started_on.is_none() {
+                mem::swap(&mut finished_on, &mut started_on);
+            }
 
             Task {
                 x,
