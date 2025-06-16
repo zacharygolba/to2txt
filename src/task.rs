@@ -105,7 +105,9 @@ impl Task<'_> {
     ///
     pub fn into_owned(self) -> Task<'static> {
         Task {
-            description: self.description.map(|value| Cow::Owned(value.into_owned())),
+            description: self.description.map(|value| {
+                Cow::Owned(value.into_owned()) // Allocation
+            }),
             ..self
         }
     }
@@ -166,8 +168,8 @@ impl FromStr for Task<'static> {
     fn from_str(input: &str) -> Result<Self, Self::Err> {
         match parser::task1(input.into()) {
             Ok((_, task)) => Ok(task.into_owned()),
-            _ => Err("unexpected end of input".to_owned()), // Allocation
-        }
+            _ => Err("unexpected end of input".to_owned()),
+        } // Allocation
     }
 }
 
