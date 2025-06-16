@@ -11,14 +11,13 @@ use std::mem;
 use std::str::FromStr;
 
 #[cfg(feature = "serde")]
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 use crate::task::{Priority, Tag, Task};
 
 type Error<'a> = nom::error::Error<Text<'a>>;
 type Text<'a> = nom_locate::LocatedSpan<&'a str>;
 
-#[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub struct Span {
     column: usize,
@@ -29,6 +28,7 @@ pub struct Span {
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Debug)]
 pub struct Token<T> {
+    #[cfg_attr(feature = "serde", serde(flatten))]
     value: T,
     span: Span,
 }
@@ -77,7 +77,7 @@ pub fn task1(input: Text) -> IResult<Text, Task> {
                 x,
                 line,
                 priority,
-                completed_on,
+                finished_on: completed_on,
                 started_on,
                 description,
             }
@@ -197,6 +197,20 @@ impl Span {
             start: source.location_offset(),
             len,
         }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for Span {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeTupleStruct;
+
+        let mut state = serializer.serialize_tuple_struct("Span", 2)?;
+
+        state.serialize_field(&self.start)?;
+        state.serialize_field(&self.end())?;
+
+        state.end()
     }
 }
 

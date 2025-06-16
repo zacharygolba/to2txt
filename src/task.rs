@@ -5,7 +5,7 @@ use std::fmt::{self, Debug, Display, Formatter};
 use std::str::FromStr;
 
 #[cfg(feature = "serde")]
-use serde::{Serialize, Serializer, ser::SerializeStruct};
+use serde::{Serialize, Serializer};
 
 use crate::parser::{self, Token};
 
@@ -38,7 +38,7 @@ pub struct Task<'a> {
     pub x: Option<Token<bool>>,
     pub line: u32,
     pub priority: Option<Token<Priority>>,
-    pub completed_on: Option<Token<NaiveDate>>,
+    pub finished_on: Option<Token<NaiveDate>>,
     pub started_on: Option<Token<NaiveDate>>,
     pub description: Token<Cow<'a, str>>,
 }
@@ -72,8 +72,8 @@ impl Task<'_> {
         self.priority.as_ref().map(Token::value)
     }
 
-    pub fn completed_on(&self) -> Option<&NaiveDate> {
-        self.completed_on.as_ref().map(Token::value)
+    pub fn finished_on(&self) -> Option<&NaiveDate> {
+        self.finished_on.as_ref().map(Token::value)
     }
 
     pub fn started_on(&self) -> Option<&NaiveDate> {
@@ -96,8 +96,8 @@ impl Task<'_> {
     ///
     pub fn is_done(&self) -> bool {
         matches!(
-            (&self.x, &self.completed_on),
-            (Some(_), None) | (None, Some(_))
+            (&self.x, &self.finished_on),
+            (Some(_), Some(_)) | (Some(_), None) | (None, Some(_))
         )
     }
 
@@ -130,7 +130,7 @@ impl Debug for Task<'_> {
             .field("x", &self.x)
             .field("line", &self.line)
             .field("priority", &self.priority)
-            .field("completed_on", &self.completed_on)
+            .field("finished_on", &self.finished_on)
             .field("started_on", &self.started_on)
             .field("description", description)
             .field("tags", &DebugTags(self.line, description))
@@ -148,15 +148,15 @@ impl Display for Task<'_> {
             write!(f, "{} ", priority)?;
         }
 
-        if let Some(completed_on) = self.completed_on() {
-            write!(f, "{} ", completed_on)?;
+        if let Some(finished_on) = self.finished_on() {
+            write!(f, "{} ", finished_on)?;
         }
 
         if let Some(started_on) = self.started_on() {
             write!(f, "{} ", started_on)?;
         }
 
-        f.write_str(self.description.as_str())
+        f.write_str(self.description())
     }
 }
 
@@ -174,6 +174,8 @@ impl FromStr for Task<'static> {
 #[cfg(feature = "serde")]
 impl Serialize for Task<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+
         struct Description<'a>(u32, &'a Token<Cow<'a, str>>);
         struct Tags<'a>(u32, &'a Token<Cow<'a, str>>);
 
@@ -182,7 +184,7 @@ impl Serialize for Task<'_> {
                 let Self(line, token) = *self;
                 let mut state = serializer.serialize_struct("Description", 2)?;
 
-                state.serialize_field("text", token)?;
+                state.serialize_field("text", token.as_str())?;
                 state.serialize_field("tags", &Tags(line, token))?;
 
                 state.end()
@@ -198,12 +200,12 @@ impl Serialize for Task<'_> {
             }
         }
 
-        let mut state = serializer.serialize_struct("Task", 6)?;
+        let mut state = serializer.serialize_struct("Task", 5)?;
 
-        state.serialize_field("x", &self.x())?;
+        state.serialize_field("is_done", &self.is_done())?;
         state.serialize_field("priority", &self.priority())?;
+        state.serialize_field("finished_on", &self.finished_on())?;
         state.serialize_field("started_on", &self.started_on())?;
-        state.serialize_field("completed_on", &self.completed_on())?;
         state.serialize_field("description", &Description(self.line, &self.description))?;
 
         state.end()
