@@ -98,19 +98,21 @@ impl Task<'_> {
         let fragment = description.as_str();
         let offset = description.span().start();
 
-        // Safety:
-        //
-        // The tags of a task are parsed lazily to avoid a dynamic, per-task
-        // allocation. In order to facilitate this, we have to create a new
-        // LocatedSpan identical to the one used to create the task's
-        // description token.
-        //
-        // We know that the line number of the provided task and the span of
-        // it's description are valid. Therefore, we know that a LocatedSpan
-        // created from these values will be structurally identical to the
-        // source of the description token.
-        //
-        let input = unsafe { LocatedSpan::new_from_raw_offset(offset, self.line, fragment, ()) };
+        let input = unsafe {
+            // Safety:
+            //
+            // The tags of a task are parsed lazily to avoid a dynamic, per-task
+            // allocation. In order to facilitate this, we have to create a new
+            // LocatedSpan identical to the one used to create the task's
+            // description token.
+            //
+            // We know that the line number of the provided task and the span of
+            // it's description are valid. Therefore, we know that a LocatedSpan
+            // created from these values will be structurally identical to the
+            // source of the description token.
+            //
+            LocatedSpan::new_from_raw_offset(offset, self.line, fragment, ())
+        };
 
         parser::tags(input)
     }
