@@ -136,7 +136,7 @@ pub(crate) fn task_as_input<'a>(task: &'a Task) -> Input<'a> {
         //
         // The tags of a task are parsed lazily to avoid a dynamic, per-task
         // allocation. In order to facilitate this, we have to create a new
-        // LocatedSpan, identical to the one used to create the task's
+        // LocatedSpan identical to the one used to create the task's
         // description token.
         //
         // We know that the line number of the provided task and the span of
