@@ -39,6 +39,16 @@ pub fn from_str(input: &str) -> impl Iterator<Item = Task<'_>> {
     iterator(input.into(), delimited(multispace0, task1, multispace0))
 }
 
+/// Parse a single task from the first line of `input`.
+///
+pub fn task_opt(input: &str) -> Option<Task> {
+    match preceded(space0, task1).parse(input.into()) {
+        Ok((_, task)) if task_is_empty(&task) => None,
+        Ok((_, task)) => Some(task),
+        Err(_) => None,
+    }
+}
+
 pub fn task1(input: Input) -> IResult<Input, Task> {
     let parts = (
         position,
@@ -56,9 +66,13 @@ pub fn task1(input: Input) -> IResult<Input, Task> {
         ))),
         opt(xspace1(date)),
         opt(xspace1(date)),
-        map(rest, |description: Input| Token {
-            value: Cow::Borrowed(*description.fragment()),
-            span: Span::new(description.len(), &description),
+        map(rest, |description: Input| {
+            let value = description.fragment().trim_ascii_end();
+
+            Token {
+                value: Cow::Borrowed(value),
+                span: Span::new(value.len(), &description),
+            }
         }),
     );
 
@@ -173,6 +187,25 @@ where
     map_res(parser, |output| output.fragment().parse())
 }
 
+/// Returns true if the task contains no headers and the description is empty.
+///
+fn task_is_empty(task: &Task) -> bool {
+    matches!(
+        task,
+        Task {
+            x: None,
+            priority: None,
+            finished_on: None,
+            started_on: None,
+            description: Token {
+                value: Cow::Borrowed(""),
+                ..
+            },
+            ..
+        }
+    )
+}
+
 fn word(input: Input) -> IResult<Input, Input> {
     take_till1(char::is_whitespace).parse(input)
 }
@@ -276,15 +309,27 @@ impl<T> Token<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::task_as_input;
+    use super::{tags, task_as_input, task_opt, task1};
+
+    #[test]
+    fn test_parse_task_opt() {
+        assert!(task_opt("").is_none(), "empty as input is None");
+        assert!(task_opt(" ").is_none(), "whitespace as input is None");
+
+        assert!(task_opt("(A) ").is_some(), "a task with headers is Some");
+        assert!(
+            task_opt("feed tomato plants +garden @home").is_some(),
+            "a task with a description is Some",
+        );
+    }
 
     #[test]
     fn test_parse_tags() {
         const INPUT: &str = "feed the tomato plants @home +garden due:2025-06-10";
-        let (_, task) = super::task1(INPUT.into()).unwrap();
-        let tags = super::tags(task_as_input(&task)).collect::<Vec<_>>();
+        let (_, task) = task1(INPUT.into()).unwrap();
+        let vec = tags(task_as_input(&task)).collect::<Vec<_>>();
 
-        assert_eq!(tags.len(), 3);
+        assert_eq!(vec.len(), 3);
     }
 
     #[test]
@@ -348,10 +393,10 @@ mod tests {
 
     #[test]
     fn test_task1() {
-        super::task1("feed tomato plants".into()).unwrap();
-        super::task1("x feed tomato plants".into()).unwrap();
-        super::task1("(A) feed tomato plants".into()).unwrap();
-        super::task1("2025-06-15 feed tomato plants".into()).unwrap();
-        super::task1("2025-06-15 2025-06-15 feed tomato plants".into()).unwrap();
+        task1("feed tomato plants".into()).unwrap();
+        task1("x feed tomato plants".into()).unwrap();
+        task1("(A) feed tomato plants".into()).unwrap();
+        task1("2025-06-15 feed tomato plants".into()).unwrap();
+        task1("2025-06-15 2025-06-15 feed tomato plants".into()).unwrap();
     }
 }

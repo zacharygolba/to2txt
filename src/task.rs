@@ -2,12 +2,11 @@ use chrono::NaiveDate;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display, Formatter};
-use std::str::FromStr;
 
 #[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 
-use crate::parser::{self, Token, task_as_input};
+use crate::parser::{self, Token};
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -91,7 +90,7 @@ impl Task<'_> {
     /// An iterator over the tags in the todo's description.
     ///
     pub fn tags(&self) -> impl Iterator<Item = Token<Tag<'_>>> {
-        parser::tags(task_as_input(self))
+        parser::tags(parser::task_as_input(self))
     }
 
     /// True when `x` is some or `finished_on` is some.
@@ -115,14 +114,23 @@ impl Task<'_> {
     }
 }
 
+impl<'a> Task<'a> {
+    /// Parse an individual task from the first line of `input`.
+    ///
+    /// If `input` is empty or contains only whitespace, `None` is returned.
+    ///
+    pub fn from_str_opt(input: &'a str) -> Option<Task<'a>> {
+        parser::task_opt(input)
+    }
+}
+
 impl Debug for Task<'_> {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
         struct DebugTags<'a>(&'a Task<'a>);
 
         impl Debug for DebugTags<'_> {
             fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-                let tags = parser::tags(task_as_input(self.0));
-                f.debug_list().entries(tags).finish()
+                f.debug_list().entries(self.0.tags()).finish()
             }
         }
 
@@ -160,17 +168,6 @@ impl Display for Task<'_> {
     }
 }
 
-impl FromStr for Task<'static> {
-    type Err = String;
-
-    fn from_str(input: &str) -> Result<Self, Self::Err> {
-        match parser::task1(input.into()) {
-            Ok((_, task)) => Ok(task.into_owned()),
-            _ => Err("unexpected end of input".to_owned()),
-        } // Allocation
-    }
-}
-
 #[cfg(feature = "serde")]
 impl Serialize for Task<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -193,7 +190,7 @@ impl Serialize for Task<'_> {
 
         impl Serialize for Tags<'_> {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                serializer.collect_seq(parser::tags(task_as_input(self.0)))
+                serializer.collect_seq(self.0.tags())
             }
         }
 
