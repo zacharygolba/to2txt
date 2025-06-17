@@ -41,7 +41,7 @@ pub fn from_str(input: &str) -> impl Iterator<Item = Task<'_>> {
 
 /// Parse a single task from the first line of `input`.
 ///
-pub fn task_opt(input: &str) -> Option<Task> {
+pub fn task_opt(input: &str) -> Option<Task<'_>> {
     match preceded(space0, task1).parse(input.into()) {
         Ok((_, task)) if task_is_empty(&task) => None,
         Ok((_, task)) => Some(task),
