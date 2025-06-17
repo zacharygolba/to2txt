@@ -18,7 +18,7 @@ use crate::task::{Priority, Tag, Task};
 type Error<'a> = nom::error::Error<Input<'a>>;
 type Input<'a> = LocatedSpan<&'a str>;
 
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Debug)]
 pub struct Span {
     column: usize,
     start: usize,
@@ -37,16 +37,6 @@ pub struct Token<T> {
 ///
 pub fn from_str(input: &str) -> impl Iterator<Item = Task<'_>> {
     iterator(input.into(), delimited(multispace0, task1, multispace0))
-}
-
-/// Parse a single task from the first line of `input`.
-///
-pub fn task_opt(input: &str) -> Option<Task<'_>> {
-    match preceded(space0, task1).parse(input.into()) {
-        Ok((_, task)) if task.is_empty() => None,
-        Ok((_, task)) => Some(task),
-        Err(_) => None,
-    }
 }
 
 pub fn task1(input: Input) -> IResult<Input, Task> {
@@ -116,30 +106,6 @@ pub fn tags<'a>(input: Input<'a>) -> impl Iterator<Item = Token<Tag<'a>>> {
     );
 
     iterator(input, tag1).flatten()
-}
-
-/// Use the description token of the provided task as parser input.
-///
-pub(crate) fn task_as_input<'a>(task: &'a Task) -> Input<'a> {
-    let description = &task.description;
-    let fragment = description.as_str();
-    let span = description.span();
-
-    unsafe {
-        // Safety:
-        //
-        // The tags of a task are parsed lazily to avoid a dynamic, per-task
-        // allocation. In order to facilitate this, we have to create a new
-        // LocatedSpan identical to the one used to create the task's
-        // description token.
-        //
-        // We know that the line number of the provided task and the span of
-        // it's description are valid. Therefore, we know that a LocatedSpan
-        // created from these values will be structurally identical to the
-        // source of the description token.
-        //
-        LocatedSpan::new_from_raw_offset(span.start(), task.line(), fragment, ())
-    }
 }
 
 fn date(input: Input) -> IResult<Input, Token<NaiveDate>> {
@@ -284,29 +250,6 @@ impl<T> Token<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{tags, task_as_input, task_opt, task1};
-
-    #[test]
-    fn test_parse_task_opt() {
-        assert!(task_opt("").is_none(), "empty as input is None");
-        assert!(task_opt(" ").is_none(), "whitespace as input is None");
-
-        assert!(task_opt("(A) ").is_some(), "a task with headers is Some");
-        assert!(
-            task_opt("feed tomato plants +garden @home").is_some(),
-            "a task with a description is Some",
-        );
-    }
-
-    #[test]
-    fn test_parse_tags() {
-        const INPUT: &str = "feed the tomato plants @home +garden due:2025-06-10";
-        let (_, task) = task1(INPUT.into()).unwrap();
-        let vec = tags(task_as_input(&task)).collect::<Vec<_>>();
-
-        assert_eq!(vec.len(), 3);
-    }
-
     #[test]
     fn test_span_range() {
         const INPUT: &str = "
@@ -368,10 +311,10 @@ mod tests {
 
     #[test]
     fn test_task1() {
-        task1("feed tomato plants".into()).unwrap();
-        task1("x feed tomato plants".into()).unwrap();
-        task1("(A) feed tomato plants".into()).unwrap();
-        task1("2025-06-15 feed tomato plants".into()).unwrap();
-        task1("2025-06-15 2025-06-15 feed tomato plants".into()).unwrap();
+        super::task1("feed tomato plants".into()).unwrap();
+        super::task1("x feed tomato plants".into()).unwrap();
+        super::task1("(A) feed tomato plants".into()).unwrap();
+        super::task1("2025-06-15 feed tomato plants".into()).unwrap();
+        super::task1("2025-06-15 2025-06-15 feed tomato plants".into()).unwrap();
     }
 }

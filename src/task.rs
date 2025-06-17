@@ -1,4 +1,8 @@
 use chrono::NaiveDate;
+use nom::Parser;
+use nom::character::complete::space0;
+use nom::sequence::preceded;
+use nom_locate::LocatedSpan;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display, Formatter};
@@ -90,7 +94,25 @@ impl Task<'_> {
     /// An iterator over the tags in the todo's description.
     ///
     pub fn tags(&self) -> impl Iterator<Item = Token<Tag<'_>>> {
-        parser::tags(parser::task_as_input(self))
+        let description = &self.description;
+        let fragment = description.as_str();
+        let offset = description.span().start();
+
+        // Safety:
+        //
+        // The tags of a task are parsed lazily to avoid a dynamic, per-task
+        // allocation. In order to facilitate this, we have to create a new
+        // LocatedSpan identical to the one used to create the task's
+        // description token.
+        //
+        // We know that the line number of the provided task and the span of
+        // it's description are valid. Therefore, we know that a LocatedSpan
+        // created from these values will be structurally identical to the
+        // source of the description token.
+        //
+        let input = unsafe { LocatedSpan::new_from_raw_offset(offset, self.line, fragment, ()) };
+
+        parser::tags(input)
     }
 
     /// True when `x` is some or `finished_on` is some.
@@ -120,7 +142,11 @@ impl<'a> Task<'a> {
     /// If `input` is empty or contains only whitespace, `None` is returned.
     ///
     pub fn from_str_opt(input: &'a str) -> Option<Task<'a>> {
-        parser::task_opt(input)
+        match preceded(space0, parser::task1).parse(input.into()) {
+            Ok((_, task)) if task.is_empty() => None,
+            Ok((_, task)) => Some(task),
+            Err(_) => None,
+        }
     }
 }
 
@@ -221,5 +247,38 @@ impl Serialize for Task<'_> {
         state.serialize_field("description", &Description(self))?;
 
         state.end()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Task;
+
+    #[test]
+    fn test_from_str_opt() {
+        assert!(Task::from_str_opt("").is_none(), "empty as input is None");
+
+        assert!(
+            Task::from_str_opt(" ").is_none(),
+            "whitespace as input is None"
+        );
+
+        assert!(
+            Task::from_str_opt("(A) ").is_some(),
+            "a task with headers is Some"
+        );
+        assert!(
+            Task::from_str_opt("feed tomato plants +garden @home").is_some(),
+            "a task with a description is Some",
+        );
+    }
+
+    #[test]
+    fn test_parse_tags() {
+        let input = "feed the tomato plants @home +garden due:2025-06-10";
+        let task = Task::from_str_opt(input).unwrap();
+        let vec = task.tags().collect::<Vec<_>>();
+
+        assert_eq!(vec.len(), 3);
     }
 }
