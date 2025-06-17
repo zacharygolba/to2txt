@@ -156,16 +156,18 @@ impl Task<'_> {
     /// Returns true if the task contains only whitespace
     ///
     pub(crate) fn is_empty(&self) -> bool {
-        match self {
-            Self {
-                x: None,
-                priority: None,
-                finished_on: None,
-                started_on: None,
-                description,
-                ..
-            } => description.as_str().trim_ascii_end().is_empty(),
-            _ => false,
+        if let Self {
+            x: None,
+            priority: None,
+            finished_on: None,
+            started_on: None,
+            description,
+            ..
+        } = self
+        {
+            description.as_str().trim_ascii_end().is_empty()
+        } else {
+            false
         }
     }
 }
