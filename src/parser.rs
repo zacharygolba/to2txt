@@ -50,7 +50,7 @@ pub fn task1(input: Text) -> IResult<Text, Task> {
             (tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
             |(open, uppercase, _)| Token {
                 // Safety: The one_of combinator ensures uppercase is 65..=90.
-                value: unsafe { mem::transmute::<u32, Priority>(uppercase as _) },
+                value: unsafe { mem::transmute::<u8, Priority>(uppercase as _) },
                 span: Span::new(3, &open),
             },
         ))),

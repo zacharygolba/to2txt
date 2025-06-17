@@ -12,7 +12,7 @@ use crate::parser::{self, Token};
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[rustfmt::skip]
-#[repr(u32)]
+#[repr(u8)]
 pub enum Priority {
     A = 65, B, C, D, E, F, G, H, I, J, K, L, M,
     N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
@@ -35,8 +35,8 @@ pub enum Tag<'a> {
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct Task<'a> {
-    pub x: Option<Token<bool>>,
     pub line: u32,
+    pub x: Option<Token<bool>>,
     pub priority: Option<Token<Priority>>,
     pub finished_on: Option<Token<NaiveDate>>,
     pub started_on: Option<Token<NaiveDate>>,
@@ -51,21 +51,23 @@ impl Display for Priority {
 
 impl PartialOrd for Priority {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(u32::partial_cmp(&(*self as _), &(*other as _))?.reverse())
+        (*self as u32)
+            .partial_cmp(&(*other as _))
+            .map(Ordering::reverse)
     }
 }
 
 impl Task<'_> {
-    /// True when the task starts with a "x".
-    ///
-    pub fn x(&self) -> bool {
-        self.x.is_some()
-    }
-
     /// The line number of the task.
     ///
     pub fn line(&self) -> u32 {
         self.line
+    }
+
+    /// True when the task starts with a "x".
+    ///
+    pub fn x(&self) -> bool {
+        self.x.is_some()
     }
 
     pub fn priority(&self) -> Option<&Priority> {
@@ -129,8 +131,8 @@ impl Debug for Task<'_> {
         let description = &self.description;
 
         fmt.debug_struct("Todo")
-            .field("x", &self.x)
             .field("line", &self.line)
+            .field("x", &self.x)
             .field("priority", &self.priority)
             .field("finished_on", &self.finished_on)
             .field("started_on", &self.started_on)
