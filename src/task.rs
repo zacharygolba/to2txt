@@ -36,14 +36,14 @@ pub enum Tag<'a> {
 /// A task from a todo list.
 ///
 #[derive(Clone)]
-#[non_exhaustive]
 pub struct Task<'a> {
-    pub line: u32,
     pub x: Option<Token<bool>>,
     pub priority: Option<Token<Priority>>,
     pub finished_on: Option<Token<NaiveDate>>,
     pub started_on: Option<Token<NaiveDate>>,
     pub description: Token<Cow<'a, str>>,
+
+    pub(crate) line: u32,
 }
 
 impl Display for Priority {
