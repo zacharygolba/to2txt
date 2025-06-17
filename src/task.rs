@@ -7,7 +7,7 @@ use std::str::FromStr;
 #[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 
-use crate::parser::{self, Token};
+use crate::parser::{self, Token, task_as_input};
 
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -91,7 +91,7 @@ impl Task<'_> {
     /// An iterator over the tags in the todo's description.
     ///
     pub fn tags(&self) -> impl Iterator<Item = Token<Tag<'_>>> {
-        parser::tags(self.description.as_input(self.line))
+        parser::tags(task_as_input(self))
     }
 
     /// True when `x` is some or `finished_on` is some.
@@ -117,18 +117,14 @@ impl Task<'_> {
 
 impl Debug for Task<'_> {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
-        struct DebugTags<'a>(u32, &'a Token<Cow<'a, str>>);
+        struct DebugTags<'a>(&'a Task<'a>);
 
         impl Debug for DebugTags<'_> {
             fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-                let Self(line, description) = *self;
-                let tags = parser::tags(description.as_input(line));
-
+                let tags = parser::tags(task_as_input(self.0));
                 f.debug_list().entries(tags).finish()
             }
         }
-
-        let description = &self.description;
 
         fmt.debug_struct("Todo")
             .field("line", &self.line)
@@ -136,8 +132,8 @@ impl Debug for Task<'_> {
             .field("priority", &self.priority)
             .field("finished_on", &self.finished_on)
             .field("started_on", &self.started_on)
-            .field("description", description)
-            .field("tags", &DebugTags(self.line, description))
+            .field("description", &self.description)
+            .field("tags", &DebugTags(self))
             .finish()
     }
 }
@@ -180,16 +176,16 @@ impl Serialize for Task<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
 
-        struct Description<'a>(u32, &'a Token<Cow<'a, str>>);
-        struct Tags<'a>(u32, &'a Token<Cow<'a, str>>);
+        struct Description<'a>(&'a Task<'a>);
+        struct Tags<'a>(&'a Task<'a>);
 
         impl Serialize for Description<'_> {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                let Self(line, token) = *self;
+                let Self(task) = *self;
                 let mut state = serializer.serialize_struct("Description", 2)?;
 
-                state.serialize_field("text", token.as_str())?;
-                state.serialize_field("tags", &Tags(line, token))?;
+                state.serialize_field("text", task.description())?;
+                state.serialize_field("tags", &Tags(task))?;
 
                 state.end()
             }
@@ -197,10 +193,7 @@ impl Serialize for Task<'_> {
 
         impl Serialize for Tags<'_> {
             fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                let Self(line, token) = *self;
-                let tags = parser::tags(token.as_input(line));
-
-                serializer.collect_seq(tags)
+                serializer.collect_seq(parser::tags(task_as_input(self.0)))
             }
         }
 
@@ -210,7 +203,7 @@ impl Serialize for Task<'_> {
         state.serialize_field("priority", &self.priority())?;
         state.serialize_field("finished_on", &self.finished_on())?;
         state.serialize_field("started_on", &self.started_on())?;
-        state.serialize_field("description", &Description(self.line, &self.description))?;
+        state.serialize_field("description", &Description(self))?;
 
         state.end()
     }

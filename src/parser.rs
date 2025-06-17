@@ -4,8 +4,8 @@ use nom::bytes::complete::{is_not, tag, take, take_till1};
 use nom::character::complete::{multispace0, one_of, space0, space1};
 use nom::combinator::{iterator, map, map_opt, map_parser, map_res, opt, rest};
 use nom::sequence::{delimited, preceded, separated_pair, terminated};
-use nom::{IResult, Input, Parser};
-use nom_locate::position;
+use nom::{IResult, Parser};
+use nom_locate::{LocatedSpan, position};
 use std::borrow::Cow;
 use std::mem;
 use std::str::FromStr;
@@ -15,8 +15,8 @@ use serde::{Serialize, Serializer};
 
 use crate::task::{Priority, Tag, Task};
 
-type Error<'a> = nom::error::Error<Text<'a>>;
-type Text<'a> = nom_locate::LocatedSpan<&'a str>;
+type Error<'a> = nom::error::Error<Input<'a>>;
+type Input<'a> = LocatedSpan<&'a str>;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub struct Span {
@@ -39,7 +39,7 @@ pub fn from_str(input: &str) -> impl Iterator<Item = Task<'_>> {
     iterator(input.into(), delimited(multispace0, task1, multispace0))
 }
 
-pub fn task1(input: Text) -> IResult<Text, Task> {
+pub fn task1(input: Input) -> IResult<Input, Task> {
     let parts = (
         position,
         opt(xspace1(map(tag("x"), |x| Token {
@@ -56,11 +56,9 @@ pub fn task1(input: Text) -> IResult<Text, Task> {
         ))),
         opt(xspace1(date)),
         opt(xspace1(date)),
-        map(rest, |output: Text| {
-            let value = Cow::Borrowed(output.fragment().trim_ascii_end());
-            let span = Span::new(value.len(), &output);
-
-            Token { value, span }
+        map(rest, |description: Input| Token {
+            value: Cow::Borrowed(*description.fragment()),
+            span: Span::new(description.len(), &description),
         }),
     );
 
@@ -87,9 +85,9 @@ pub fn task1(input: Text) -> IResult<Text, Task> {
     parser.parse(input)
 }
 
-pub fn tags<'a>(input: Text<'a>) -> impl Iterator<Item = Token<Tag<'a>>> {
+pub fn tags<'a>(input: Input<'a>) -> impl Iterator<Item = Token<Tag<'a>>> {
     let typed = |ctor: fn(&'a str) -> Tag<'a>| {
-        move |(from, output): (Text<'a>, Text<'a>)| Token {
+        move |(from, output): (Input<'a>, Input<'a>)| Token {
             value: ctor(output.fragment()),
             span: Span::new(output.len() + 1, &from),
         }
@@ -112,7 +110,31 @@ pub fn tags<'a>(input: Text<'a>) -> impl Iterator<Item = Token<Tag<'a>>> {
     iterator(input, tag1).flatten()
 }
 
-fn date(input: Text) -> IResult<Text, Token<NaiveDate>> {
+/// Use the description token of the provided task as parser input.
+///
+pub(crate) fn task_as_input<'a>(task: &'a Task) -> Input<'a> {
+    let description = &task.description;
+    let fragment = description.as_str();
+    let span = description.span();
+
+    unsafe {
+        // Safety:
+        //
+        // The tags of a task are parsed lazily to avoid a dynamic, per-task
+        // allocation. In order to facilitate this, we have to create a new
+        // LocatedSpan, identical to the one used to create the task's
+        // description token.
+        //
+        // We know that the line number of the provided task and the span of
+        // it's description are valid. Therefore, we know that a LocatedSpan
+        // created from these values will be structurally identical to the
+        // source of the description token.
+        //
+        LocatedSpan::new_from_raw_offset(span.start(), task.line(), fragment, ())
+    }
+}
+
+fn date(input: Input) -> IResult<Input, Token<NaiveDate>> {
     let ymd = (
         terminated(parse_to(take(4usize)), tag("-")),
         terminated(parse_to(take(2usize)), tag("-")),
@@ -129,8 +151,10 @@ fn date(input: Text) -> IResult<Text, Token<NaiveDate>> {
     parser.parse(input)
 }
 
-fn not_line_ending(input: Text) -> IResult<Text, Text> {
-    let mut parser = map(is_not("\n"), |output: Text| {
+fn not_line_ending(input: Input) -> IResult<Input, Input> {
+    use nom::Input as ImplInput;
+
+    let mut parser = map(is_not("\n"), |output: Input| {
         if output.ends_with('\r') {
             output.take(output.len() - 1)
         } else {
@@ -141,24 +165,24 @@ fn not_line_ending(input: Text) -> IResult<Text, Text> {
     parser.parse(input)
 }
 
-fn parse_to<'a, R, P>(parser: P) -> impl Parser<Text<'a>, Output = R, Error = Error<'a>>
+fn parse_to<'a, R, P>(parser: P) -> impl Parser<Input<'a>, Output = R, Error = Error<'a>>
 where
     R: FromStr,
-    P: Parser<Text<'a>, Output = Text<'a>, Error = Error<'a>>,
+    P: Parser<Input<'a>, Output = Input<'a>, Error = Error<'a>>,
 {
     map_res(parser, |output| output.fragment().parse())
 }
 
-fn word(input: Text) -> IResult<Text, Text> {
+fn word(input: Input) -> IResult<Input, Input> {
     take_till1(char::is_whitespace).parse(input)
 }
 
 /// Apply the provided parser to the input until one or more space or tab
 /// character is found.
 ///
-fn xspace1<'a, P>(parser: P) -> impl Parser<Text<'a>, Output = P::Output, Error = P::Error>
+fn xspace1<'a, P>(parser: P) -> impl Parser<Input<'a>, Output = P::Output, Error = P::Error>
 where
-    P: Parser<Text<'a>>,
+    P: Parser<Input<'a>>,
 {
     terminated(parser, space1)
 }
@@ -191,7 +215,7 @@ impl Span {
 }
 
 impl Span {
-    fn new(len: usize, source: &Text) -> Self {
+    fn new(len: usize, source: &Input) -> Self {
         Self {
             column: source.get_utf8_column(),
             start: source.location_offset(),
@@ -236,20 +260,6 @@ impl Token<Cow<'_, str>> {
     pub fn into_string(self) -> String {
         self.value.into_owned()
     }
-
-    pub(crate) fn as_input(&self, line: u32) -> Text<'_> {
-        let fragment = self.as_str();
-        let span = self.span();
-
-        unsafe {
-            // Safety:
-            //
-            // Any span produced from the following type will be >=
-            // span.start() and <= span.end().
-            //
-            Text::new_from_raw_offset(span.start(), line, fragment, ())
-        }
-    }
 }
 
 impl<T> Token<T> {
@@ -266,11 +276,13 @@ impl<T> Token<T> {
 
 #[cfg(test)]
 mod tests {
+    use super::task_as_input;
+
     #[test]
     fn test_parse_tags() {
         const INPUT: &str = "feed the tomato plants @home +garden due:2025-06-10";
         let (_, task) = super::task1(INPUT.into()).unwrap();
-        let tags = super::tags(task.description.as_input(task.line)).collect::<Vec<_>>();
+        let tags = super::tags(task_as_input(&task)).collect::<Vec<_>>();
 
         assert_eq!(tags.len(), 3);
     }
