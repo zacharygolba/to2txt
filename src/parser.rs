@@ -43,7 +43,7 @@ pub fn from_str(input: &str) -> impl Iterator<Item = Task<'_>> {
 ///
 pub fn task_opt(input: &str) -> Option<Task<'_>> {
     match preceded(space0, task1).parse(input.into()) {
-        Ok((_, task)) if task_is_empty(&task) => None,
+        Ok((_, task)) if task.is_empty() => None,
         Ok((_, task)) => Some(task),
         Err(_) => None,
     }
@@ -66,28 +66,22 @@ pub fn task1(input: Input) -> IResult<Input, Task> {
         ))),
         opt(xspace1(date)),
         opt(xspace1(date)),
-        map(rest, |description: Input| {
-            let value = description.fragment().trim_ascii_end();
-
-            Token {
-                value: Cow::Borrowed(value),
-                span: Span::new(value.len(), &description),
-            }
+        map(rest, |description: Input| Token {
+            value: Cow::Borrowed(*description.fragment()),
+            span: Span::new(description.len(), &description),
         }),
     );
 
     let mut parser = map(
         map_parser(not_line_ending, parts),
         |(start, x, priority, mut finished_on, mut started_on, description)| {
-            let line = start.location_line();
-
             if started_on.is_none() {
                 mem::swap(&mut finished_on, &mut started_on);
             }
 
             Task {
+                line: start.location_line(),
                 x,
-                line,
                 priority,
                 finished_on,
                 started_on,
@@ -185,25 +179,6 @@ where
     P: Parser<Input<'a>, Output = Input<'a>, Error = Error<'a>>,
 {
     map_res(parser, |output| output.fragment().parse())
-}
-
-/// Returns true if the task contains no headers and the description is empty.
-///
-fn task_is_empty(task: &Task) -> bool {
-    matches!(
-        task,
-        Task {
-            x: None,
-            priority: None,
-            finished_on: None,
-            started_on: None,
-            description: Token {
-                value: Cow::Borrowed(""),
-                ..
-            },
-            ..
-        }
-    )
 }
 
 fn word(input: Input) -> IResult<Input, Input> {

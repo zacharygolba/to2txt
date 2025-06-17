@@ -70,15 +70,15 @@ impl Task<'_> {
     }
 
     pub fn priority(&self) -> Option<&Priority> {
-        self.priority.as_ref().map(Token::value)
+        Some(self.priority.as_ref()?.value())
     }
 
     pub fn finished_on(&self) -> Option<&NaiveDate> {
-        self.finished_on.as_ref().map(Token::value)
+        Some(self.finished_on.as_ref()?.value())
     }
 
     pub fn started_on(&self) -> Option<&NaiveDate> {
-        self.started_on.as_ref().map(Token::value)
+        Some(self.started_on.as_ref()?.value())
     }
 
     /// A str to the task's description text.
@@ -121,6 +121,24 @@ impl<'a> Task<'a> {
     ///
     pub fn from_str_opt(input: &'a str) -> Option<Task<'a>> {
         parser::task_opt(input)
+    }
+}
+
+impl Task<'_> {
+    /// Returns true if the task contains only whitespace
+    ///
+    pub(crate) fn is_empty(&self) -> bool {
+        match self {
+            Self {
+                x: None,
+                priority: None,
+                finished_on: None,
+                started_on: None,
+                description,
+                ..
+            } => description.as_str().trim_ascii_end().is_empty(),
+            _ => false,
+        }
     }
 }
 
