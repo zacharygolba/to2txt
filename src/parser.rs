@@ -2,9 +2,9 @@ use chrono::NaiveDate;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, take, take_till1};
 use nom::character::complete::{multispace0, one_of, space0, space1};
-use nom::combinator::{iterator, map, map_opt, map_parser, map_res, opt, rest};
-use nom::sequence::{delimited, preceded, separated_pair, terminated};
-use nom::{IResult, Parser};
+use nom::combinator::{iterator, map, map_opt, map_parser, map_res, opt, recognize, rest};
+use nom::sequence::{delimited, preceded, terminated};
+use nom::{IResult, Input as ImplInput, Parser};
 use nom_locate::{LocatedSpan, position};
 use std::borrow::Cow;
 use std::mem;
@@ -16,7 +16,7 @@ use serde::{Serialize, Serializer};
 use crate::task::{Priority, Tag, Task};
 
 type Error<'a> = nom::error::Error<Input<'a>>;
-type Input<'a> = LocatedSpan<&'a str>;
+type Input<'a, T = ()> = LocatedSpan<&'a str, T>;
 
 #[derive(Clone, Debug)]
 pub struct Span {
@@ -28,9 +28,9 @@ pub struct Span {
 #[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Debug)]
 pub struct Token<T> {
+    span: Span,
     #[cfg_attr(feature = "serde", serde(flatten))]
     value: T,
-    span: Span,
 }
 
 /// Parse a todo list from the provided `&str`.
@@ -41,41 +41,45 @@ pub fn from_str(input: &str) -> impl Iterator<Item = Task<'_>> {
 
 pub fn task1(input: Input) -> IResult<Input, Task> {
     let parts = (
-        position,
         opt(xspace1(map(tag("x"), |x| Token {
-            value: true,
             span: Span::new(1, &x),
+            value: true,
         }))),
         opt(xspace1(map(
             (tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
             |(open, uppercase, _)| Token {
+                span: Span::new(3, &open),
                 // Safety: The one_of combinator ensures uppercase is 65..=90.
                 value: unsafe { mem::transmute::<u8, Priority>(uppercase as _) },
-                span: Span::new(3, &open),
             },
         ))),
         opt(xspace1(date)),
         opt(xspace1(date)),
-        map(rest, |description: Input| Token {
-            value: Cow::Borrowed(*description.fragment()),
-            span: Span::new(description.len(), &description),
+        map(rest, |description: Input| {
+            (
+                description.location_line(),
+                Token {
+                    span: Span::new(description.len(), &description),
+                    value: Cow::Borrowed(description.into_fragment()),
+                },
+            )
         }),
     );
 
     let mut parser = map(
         map_parser(not_line_ending, parts),
-        |(start, x, priority, mut finished_on, mut started_on, description)| {
+        |(x, priority, mut finished_on, mut started_on, (line, description))| {
             if started_on.is_none() {
                 mem::swap(&mut finished_on, &mut started_on);
             }
 
             Task {
-                line: start.location_line(),
                 x,
                 priority,
                 finished_on,
                 started_on,
                 description,
+                line,
             }
         },
     );
@@ -85,21 +89,21 @@ pub fn task1(input: Input) -> IResult<Input, Task> {
 
 pub fn tags<'a>(input: Input<'a>) -> impl Iterator<Item = Token<Tag<'a>>> {
     let typed = |ctor: fn(&'a str) -> Tag<'a>| {
-        move |(from, output): (Input<'a>, Input<'a>)| Token {
-            value: ctor(output.fragment()),
-            span: Span::new(output.len() + 1, &from),
+        move |value: Input<'a>| Token {
+            span: Span::new(value.len(), &value),
+            value: ctor(&value.into_fragment()[1..]),
         }
     };
 
     let tag1 = map_parser(
         preceded(space0, word),
         opt(alt((
-            map((tag("@"), word), typed(Tag::Context)),
-            map((tag("+"), word), typed(Tag::Project)),
-            map(separated_pair(is_not(" :"), tag(":"), word), |(k, v)| {
+            map(recognize(preceded(tag("@"), word)), typed(Tag::Context)),
+            map(recognize(preceded(tag("+"), word)), typed(Tag::Project)),
+            map((is_not(" :"), tag(":"), word), |(key, colon, value)| {
                 Token {
-                    value: Tag::Named(k.fragment(), v.fragment()),
-                    span: Span::new(k.len() + v.len() + 1, &k),
+                    span: Span::new(key.len() + colon.len() + value.len(), &key),
+                    value: Tag::Named(key.into_fragment(), value.into_fragment()),
                 }
             }),
         ))),
@@ -117,8 +121,8 @@ fn date(input: Input) -> IResult<Input, Token<NaiveDate>> {
 
     let mut parser = map_opt((position, ymd), |(start, (y, m, d))| {
         Some(Token {
-            value: NaiveDate::from_ymd_opt(y, m, d)?,
             span: Span::new(10, &start),
+            value: NaiveDate::from_ymd_opt(y, m, d)?,
         })
     });
 
@@ -126,8 +130,6 @@ fn date(input: Input) -> IResult<Input, Token<NaiveDate>> {
 }
 
 fn not_line_ending(input: Input) -> IResult<Input, Input> {
-    use nom::Input as ImplInput;
-
     let mut parser = map(is_not("\n"), |output: Input| {
         if output.ends_with('\r') {
             output.take(output.len() - 1)
@@ -213,16 +215,16 @@ impl Serialize for Span {
 }
 
 impl<T> Token<T> {
-    /// A reference to the literal value that the token represents.
-    ///
-    pub fn value(&self) -> &T {
-        &self.value
-    }
-
     /// A reference to the location of the token in the parser input.
     ///
     pub fn span(&self) -> &Span {
         &self.span
+    }
+
+    /// A reference to the literal value that the token represents.
+    ///
+    pub fn value(&self) -> &T {
+        &self.value
     }
 }
 
