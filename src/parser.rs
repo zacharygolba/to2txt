@@ -2,35 +2,21 @@ use chrono::NaiveDate;
 use nom::branch::alt;
 use nom::bytes::complete::{is_not, tag, take, take_till1};
 use nom::character::complete::{multispace0, one_of, space0, space1};
-use nom::combinator::{iterator, map, map_opt, map_parser, map_res, opt, recognize, rest};
-use nom::sequence::{delimited, preceded, terminated};
-use nom::{IResult, Input as ImplInput, Parser};
-use nom_locate::{LocatedSpan, position};
-use std::borrow::Cow;
+use nom::combinator::{iterator, map, map_opt, map_parser, map_res, opt, rest};
+use nom::sequence::{delimited, preceded, separated_pair, terminated};
+use nom::{IResult, Input as ImplInput, Offset, Parser};
+use nom_locate::LocatedSpan;
 use std::mem;
 use std::str::FromStr;
 
-#[cfg(feature = "serde")]
-use serde::{Serialize, Serializer};
-
 use crate::task::{Priority, Tag, Task};
 
-type Error<'a> = nom::error::Error<Input<'a>>;
-type Input<'a, T = ()> = LocatedSpan<&'a str, T>;
+type Error<'a> = nom::error::Error<LocatedSpan<&'a str>>;
+type Input<'a> = LocatedSpan<&'a str>;
 
 #[derive(Clone, Debug)]
-pub struct Span {
-    column: usize,
-    start: usize,
-    len: usize,
-}
-
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Debug)]
-pub struct Token<T> {
-    span: Span,
-    #[cfg_attr(feature = "serde", serde(flatten))]
-    value: T,
+pub struct Token<'a, T = ()> {
+    span: LocatedSpan<&'a str, T>,
 }
 
 /// Parse a todo list from the provided `&str`.
@@ -41,34 +27,20 @@ pub fn from_str(input: &str) -> impl Iterator<Item = Task<'_>> {
 
 pub fn task1(input: Input) -> IResult<Input, Task> {
     let parts = (
-        opt(xspace1(map(tag("x"), |x| Token {
-            span: Span::new(1, &x),
-            value: true,
-        }))),
-        opt(xspace1(map(
-            (tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
-            |(open, uppercase, _)| Token {
-                span: Span::new(3, &open),
-                // Safety: The one_of combinator ensures uppercase is 65..=90.
-                value: unsafe { mem::transmute::<u8, Priority>(uppercase as _) },
-            },
-        ))),
-        opt(xspace1(date)),
-        opt(xspace1(date)),
-        map(rest, |description: Input| {
-            (
-                description.location_line(),
-                Token {
-                    span: Span::new(description.len(), &description),
-                    value: Cow::Borrowed(description.into_fragment()),
-                },
-            )
-        }),
+        opt(xspace1(map(tag("x"), Token::new))),
+        opt(xspace1(item(map(
+            delimited(tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
+            // Safety: The one_of combinator ensures uppercase is 65..=90.
+            |uppercase| unsafe { mem::transmute::<u8, Priority>(uppercase as _) },
+        )))),
+        opt(xspace1(item(date))),
+        opt(xspace1(item(date))),
+        map(rest, Token::new),
     );
 
     let mut parser = map(
         map_parser(not_line_ending, parts),
-        |(x, priority, mut finished_on, mut started_on, (line, description))| {
+        |(x, priority, mut finished_on, mut started_on, description)| {
             if started_on.is_none() {
                 mem::swap(&mut finished_on, &mut started_on);
             }
@@ -79,7 +51,6 @@ pub fn task1(input: Input) -> IResult<Input, Task> {
                 finished_on,
                 started_on,
                 description,
-                line,
             }
         },
     );
@@ -87,46 +58,49 @@ pub fn task1(input: Input) -> IResult<Input, Task> {
     parser.parse(input)
 }
 
-pub fn tags<'a>(input: Input<'a>) -> impl Iterator<Item = Token<Tag<'a>>> {
-    let typed = |ctor: fn(&'a str) -> Tag<'a>| {
-        move |value: Input<'a>| Token {
-            span: Span::new(value.len(), &value),
-            value: ctor(&value.into_fragment()[1..]),
-        }
-    };
-
+pub fn tags<'a>(input: &Token<'a>) -> impl Iterator<Item = Token<'a, Tag<'a>>> {
     let tag1 = map_parser(
         preceded(space0, word),
         opt(alt((
-            map(recognize(preceded(tag("@"), word)), typed(Tag::Context)),
-            map(recognize(preceded(tag("+"), word)), typed(Tag::Project)),
-            map((is_not(" :"), tag(":"), word), |(key, colon, value)| {
-                Token {
-                    span: Span::new(key.len() + colon.len() + value.len(), &key),
-                    value: Tag::Named(key.into_fragment(), value.into_fragment()),
-                }
-            }),
+            item(map(preceded(tag("@"), word), |context| {
+                Tag::Context(Token::new(context))
+            })),
+            item(map(preceded(tag("+"), word), |project| {
+                Tag::Project(Token::new(project))
+            })),
+            item(map(
+                separated_pair(is_not(" :"), tag(":"), word),
+                |(key, value)| Tag::Named(Token::new(key), Token::new(value)),
+            )),
         ))),
     );
 
-    iterator(input, tag1).flatten()
+    iterator(input.span, tag1).flatten()
 }
 
-fn date(input: Input) -> IResult<Input, Token<NaiveDate>> {
-    let ymd = (
-        terminated(parse_to(take(4usize)), tag("-")),
-        terminated(parse_to(take(2usize)), tag("-")),
-        parse_to(take(2usize)),
+fn date(input: Input) -> IResult<Input, NaiveDate> {
+    let mut parser = map_opt(
+        (
+            terminated(parse_to(take(4usize)), tag("-")),
+            terminated(parse_to(take(2usize)), tag("-")),
+            parse_to(take(2usize)),
+        ),
+        |(y, m, d)| NaiveDate::from_ymd_opt(y, m, d),
     );
 
-    let mut parser = map_opt((position, ymd), |(start, (y, m, d))| {
-        Some(Token {
-            span: Span::new(10, &start),
-            value: NaiveDate::from_ymd_opt(y, m, d)?,
-        })
-    });
-
     parser.parse(input)
+}
+
+fn item<'a, P>(mut parser: P) -> impl FnMut(Input<'a>) -> IResult<Input<'a>, Token<'a, P::Output>>
+where
+    P: Parser<Input<'a>, Error = Error<'a>>,
+{
+    move |input| {
+        let (rest, value) = parser.parse(input)?;
+        let span = input.take(input.offset(&rest)).map_extra(|_| value);
+
+        Ok((rest, Token::new(span)))
+    }
 }
 
 fn not_line_ending(input: Input) -> IResult<Input, Input> {
@@ -163,90 +137,47 @@ where
     terminated(parser, space1)
 }
 
-impl Span {
-    /// The UTF-8 column number of the token.
+impl<T> Token<'_, T> {
+    /// A str to the source from which self was recognized.
     ///
-    pub fn column(&self) -> usize {
-        self.column
+    pub fn fragment(&self) -> &str {
+        self.span.fragment()
     }
 
-    /// The index of the first byte of the token.
-    ///
-    pub fn start(&self) -> usize {
-        self.start
-    }
-
-    /// The index of the last byte of the token.
-    ///
-    pub fn end(&self) -> usize {
-        self.start() + self.len()
-    }
-
-    /// The length in bytes of the token.
-    ///
-    #[allow(clippy::len_without_is_empty)]
-    pub fn len(&self) -> usize {
-        self.len
-    }
-}
-
-impl Span {
-    fn new(len: usize, source: &Input) -> Self {
-        Self {
-            column: source.get_utf8_column(),
-            start: source.location_offset(),
-            len,
-        }
-    }
-}
-
-#[cfg(feature = "serde")]
-impl Serialize for Span {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeTupleStruct;
-
-        let mut state = serializer.serialize_tuple_struct("Span", 2)?;
-
-        state.serialize_field(&self.start)?;
-        state.serialize_field(&self.end())?;
-
-        state.end()
-    }
-}
-
-impl<T> Token<T> {
-    /// A reference to the location of the token in the parser input.
-    ///
-    pub fn span(&self) -> &Span {
-        &self.span
-    }
-
-    /// A reference to the literal value that the token represents.
+    /// A reference to the literal value of the token.
     ///
     pub fn value(&self) -> &T {
-        &self.value
+        &self.span.extra
+    }
+
+    pub fn line(&self) -> u32 {
+        self.span.location_line()
+    }
+
+    /// The UTF-8 column number of self in the parser input.
+    ///
+    pub fn column(&self) -> usize {
+        self.span.get_utf8_column()
+    }
+
+    /// The index of the first byte of self in the parser input.
+    ///
+    pub fn start(&self) -> usize {
+        self.span.location_offset()
+    }
+
+    /// The index of the last byte of self in the parser input.
+    ///
+    pub fn end(&self) -> usize {
+        let span = &self.span;
+        span.location_offset() + span.len()
     }
 }
 
-impl Token<Cow<'_, str>> {
-    pub fn as_str(&self) -> &str {
-        self.value.as_ref()
-    }
-
-    pub fn into_string(self) -> String {
-        self.value.into_owned()
-    }
-}
-
-impl<T> Token<T> {
-    pub(crate) fn map<U, F>(self, f: F) -> Token<U>
-    where
-        F: FnOnce(T) -> U,
-    {
-        Token {
-            value: f(self.value),
-            span: self.span,
-        }
+impl<'a, T> Token<'a, T> {
+    #[inline]
+    pub(crate) fn new(span: LocatedSpan<&'a str, T>) -> Self {
+        Self { span }
     }
 }
 
@@ -273,30 +204,27 @@ mod tests {
 
         {
             let description = &first.description;
-            let span = description.span();
 
             assert_eq!(
-                INPUT.get(span.start()..span.end()),
+                INPUT.get(description.start()..description.end()),
                 Some("feed tomato plants"),
             );
         }
 
         {
             let description = &second.description;
-            let span = description.span();
 
             assert_eq!(
-                INPUT.get(span.start()..span.end()),
+                INPUT.get(description.start()..description.end()),
                 Some("write tests for +to2txt"),
             );
         }
 
         {
             let description = &third.description;
-            let span = description.span();
 
             assert_eq!(
-                INPUT.get(span.start()..span.end()),
+                INPUT.get(description.start()..description.end()),
                 Some("deploy repl example to vercel +to2txt"),
             );
         }
