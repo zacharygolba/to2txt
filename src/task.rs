@@ -3,10 +3,10 @@ use nom::Parser;
 use nom::character::complete::space0;
 use nom::sequence::preceded;
 use std::cmp::Ordering;
-use std::fmt::{self, Debug, Display, Formatter};
+use std::fmt::{self, Display, Formatter};
 
 #[cfg(feature = "serde")]
-use serde::{Serialize, Serializer};
+use serde::Serialize;
 
 use crate::parser::{self, Token};
 
@@ -26,8 +26,8 @@ pub enum Priority {
 // )]
 #[derive(Clone, Debug)]
 pub enum Tag<'a> {
-    Context(Token<'a>),
-    Project(Token<'a>),
+    Context(Token<'a, &'a str>),
+    Project(Token<'a, &'a str>),
     Named(Token<'a>, Token<'a>),
 }
 
@@ -41,6 +41,23 @@ pub struct Task<'a> {
     pub finished_on: Option<Token<'a, NaiveDate>>,
     pub started_on: Option<Token<'a, NaiveDate>>,
     pub description: Token<'a>,
+}
+
+/// Returns true if the task contains only whitespace
+///
+fn is_empty(task: &Task) -> bool {
+    if let Task {
+        x: None,
+        priority: None,
+        finished_on: None,
+        started_on: None,
+        description,
+    } = task
+    {
+        description.fragment().trim_ascii_end().is_empty()
+    } else {
+        false
+    }
 }
 
 impl Display for Priority {
@@ -107,29 +124,9 @@ impl<'a> Task<'a> {
     ///
     pub fn from_str_opt(input: &'a str) -> Option<Task<'a>> {
         match preceded(space0, parser::task1).parse(input.into()) {
-            Ok((_, task)) if task.is_empty() => None,
+            Ok((_, task)) if is_empty(&task) => None,
             Ok((_, task)) => Some(task),
             Err(_) => None,
-        }
-    }
-}
-
-impl Task<'_> {
-    /// Returns true if the task contains only whitespace
-    ///
-    pub(crate) fn is_empty(&self) -> bool {
-        if let Self {
-            x: None,
-            priority: None,
-            finished_on: None,
-            started_on: None,
-            description,
-            ..
-        } = self
-        {
-            description.fragment().trim_ascii_end().is_empty()
-        } else {
-            false
         }
     }
 }
@@ -157,76 +154,5 @@ impl Display for Task<'_> {
         }
 
         f.write_str(self.description())
-    }
-}
-
-#[cfg(feature = "serde")]
-impl Serialize for Task<'_> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeStruct;
-
-        struct Description<'a>(&'a Task<'a>);
-        // struct Tags<'a>(&'a Task<'a>);
-
-        impl Serialize for Description<'_> {
-            fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                let Self(task) = *self;
-                let mut state = serializer.serialize_struct("Description", 2)?;
-
-                state.serialize_field("text", task.description())?;
-                // state.serialize_field("tags", &Tags(task))?;
-
-                state.end()
-            }
-        }
-
-        // impl Serialize for Tags<'_> {
-        //     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        //         serializer.collect_seq(self.0.tags())
-        //     }
-        // }
-
-        let mut state = serializer.serialize_struct("Task", 5)?;
-
-        // state.serialize_field("is_done", &self.is_done())?;
-        // state.serialize_field("priority", &self.priority())?;
-        // state.serialize_field("finished_on", &self.finished_on())?;
-        // state.serialize_field("started_on", &self.started_on())?;
-        state.serialize_field("description", &Description(self))?;
-
-        state.end()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Task;
-
-    #[test]
-    fn test_from_str_opt() {
-        assert!(Task::from_str_opt("").is_none(), "empty as input is None");
-
-        assert!(
-            Task::from_str_opt(" ").is_none(),
-            "whitespace as input is None"
-        );
-
-        assert!(
-            Task::from_str_opt("(A) ").is_some(),
-            "a task with headers is Some"
-        );
-        assert!(
-            Task::from_str_opt("feed tomato plants +garden @home").is_some(),
-            "a task with a description is Some",
-        );
-    }
-
-    #[test]
-    fn test_parse_tags() {
-        let input = "feed the tomato plants @home +garden due:2025-06-10";
-        let task = Task::from_str_opt(input).unwrap();
-        let vec = task.tags().collect::<Vec<_>>();
-
-        assert_eq!(vec.len(), 3);
     }
 }

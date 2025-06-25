@@ -1,16 +1,20 @@
-use std::fmt::{self, Debug, Formatter};
+mod s_expr;
 
+use std::fmt::Write;
 use wasm_bindgen::prelude::*;
 
-struct Tasks<'a>(&'a str);
-
-impl Debug for Tasks<'_> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        f.debug_list().entries(to2txt::from_str(self.0)).finish()
-    }
-}
+use s_expr::WriteSExpr;
 
 #[wasm_bindgen]
-pub fn parse(input: &str) -> String {
-    format!("{:#?}", Tasks(input))
+pub fn parse(input: &str) -> Result<String, String> {
+    let mut output = String::new();
+
+    for task in to2txt::from_str(input) {
+        let s_expr = WriteSExpr::new(&task);
+        if let Err(e) = writeln!(&mut output, "{}", s_expr) {
+            return Err(e.to_string());
+        }
+    }
+
+    Ok(output)
 }

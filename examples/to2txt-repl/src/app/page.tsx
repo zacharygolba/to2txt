@@ -31,7 +31,11 @@ export default function Home(): JSX.Element {
         </section>
         <section className={clsx(styles.pane, "overflow-y-auto")}>
           <Output
-            className={clsx("px-4.5 py-4 text-sm", anonymousPro.className)}
+            className={clsx(
+              "px-4.5 py-4",
+              styles.output,
+              anonymousPro.className,
+            )}
             value={tasks}
           />
         </section>
