@@ -64,20 +64,20 @@ impl<'a> Task<'a> {
 
     /// True when the task starts with a "x".
     ///
-    pub fn x(&self) -> Option<&Token> {
-        self.x.as_ref()
+    pub fn x(&self) -> bool {
+        self.x.is_some()
     }
 
-    pub fn priority(&self) -> Option<&Token<Priority>> {
-        self.priority.as_ref()
+    pub fn priority(&self) -> Option<&Priority> {
+        Some(self.priority.as_ref()?.value())
     }
 
-    pub fn finished_on(&self) -> Option<&Token<NaiveDate>> {
-        self.finished_on.as_ref()
+    pub fn finished_on(&self) -> Option<&NaiveDate> {
+        Some(self.finished_on.as_ref()?.value())
     }
 
-    pub fn started_on(&self) -> Option<&Token<NaiveDate>> {
-        self.started_on.as_ref()
+    pub fn started_on(&self) -> Option<&NaiveDate> {
+        Some(self.started_on.as_ref()?.value())
     }
 
     /// A str to the task's description text.
