@@ -1,248 +1,246 @@
 use chrono::NaiveDate;
 use nom::branch::alt;
-use nom::bytes::complete::{is_not, tag, take, take_while1};
-use nom::character::complete::{char, line_ending, one_of, space0, space1};
-use nom::combinator::{iterator, map, map_parser, map_res, opt, rest};
+use nom::bytes::complete::{is_not, tag, take, take_till1};
+use nom::character::complete::{multispace0, one_of, space0, space1};
+use nom::combinator::{iterator, map, map_opt, map_parser, map_res, opt, recognize, rest};
 use nom::sequence::{delimited, preceded, separated_pair, terminated};
-use nom::{IResult, Parser};
-use nom_locate::position;
-use std::borrow::Cow;
-use std::cmp::Ordering;
+use nom::{IResult, Input, Offset, Parser};
+use nom_locate::LocatedSpan;
 use std::mem;
 use std::str::FromStr;
 
-#[cfg(feature = "serde")]
-use serde::Serialize;
+use crate::task::{Priority, Tag, Task};
 
-use crate::Priority;
-use crate::task::{Tag, Task};
+type Error<'a> = nom::error::Error<Span<'a>>;
+type Span<'a, T = ()> = LocatedSpan<&'a str, T>;
 
-type Error<'a> = nom::error::Error<Input<'a>>;
-type Input<'a> = nom_locate::LocatedSpan<&'a str>;
-type Parts<'a> = (
-    Input<'a>,
-    Option<char>,
-    Option<(Input<'a>, char, Input<'a>)>,
-    Option<(Input<'a>, (i32, u32, u32))>,
-    Option<(Input<'a>, (i32, u32, u32))>,
-    Input<'a>,
-);
-
-#[cfg_attr(feature = "serde", derive(Serialize))]
-#[derive(Clone, Debug, PartialEq, PartialOrd)]
-pub struct Span(usize, usize);
-
-#[cfg_attr(feature = "serde", derive(Serialize))]
 #[derive(Clone, Debug)]
-pub struct Token<T> {
-    pub(crate) value: T,
-    pub(crate) span: Span,
+pub struct Token<'a, T = ()> {
+    span: Span<'a, T>,
 }
 
 /// Parse a todo list from the provided `&str`.
 ///
 pub fn from_str(input: &str) -> impl Iterator<Item = Task<'_>> {
-    iterator(input.into(), delimited(eol, task, eol)).flatten()
+    iterator(input.into(), delimited(multispace0, task1, multispace0))
 }
 
-pub fn task(input: Input) -> IResult<Input, Option<Task>> {
-    let mut parser = map_parser(
-        is_not("\r\n"),
-        (
-            preceded(space0, position),
-            opt(terminated(char('x'), space1)),
-            opt(terminated(
-                (tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
-                space1,
-            )),
-            opt((position, terminated(ymd, space1))),
-            opt((position, terminated(ymd, space1))),
-            map(preceded(space0, rest), trim_end),
-        ),
-    );
-
-    parser.parse(input).map(|(rest, parts)| match &parts {
-        (_, None, None, None, None, description) if description.is_empty() => (rest, None),
-        _ => (rest, Some(task_from_parts(parts))),
-    })
-}
-
-pub fn tags<'a>(offset: usize, description: &'a str) -> impl Iterator<Item = Tag<'a>> {
-    let typed = |ctor: fn(Token<&'a str>) -> Tag<'a>| {
-        move |(pos, output): (Input<'a>, Input<'a>)| {
-            ctor(Token::new(
-                Span::locate_from(&pos, output.len() + 1, offset),
-                output.into_fragment(),
-            ))
-        }
-    };
-
-    let parse1 = map_parser(
+pub fn tags<'a>(input: &Token<'a>) -> impl Iterator<Item = Token<'a, Tag<'a>>> {
+    let tag1 = map_parser(
         preceded(space0, word),
         opt(alt((
-            map((tag("@"), word), typed(Tag::Context)),
-            map((tag("+"), word), typed(Tag::Project)),
-            map(
+            item(map(recognize((tag("@"), word)), |context| {
+                let value = &context.fragment()[1..];
+                Tag::Context(Token::new(context.map_extra(|_| value)))
+            })),
+            item(map(recognize((tag("+"), word)), |project| {
+                let value = &project.fragment()[1..];
+                Tag::Project(Token::new(project.map_extra(|_| value)))
+            })),
+            item(map(
                 separated_pair(is_not(" :"), tag(":"), word),
-                move |(name, value)| {
-                    let len = name.len() + value.len() + 1;
-                    Tag::Named(Token::new(
-                        Span::locate_from(&name, len, offset),
-                        (name.into_fragment(), value.into_fragment()),
-                    ))
-                },
-            ),
+                |(key, value)| Tag::Named(Token::new(key), Token::new(value)),
+            )),
         ))),
     );
 
-    iterator(description.into(), parse1).flatten()
+    iterator(input.to_span(), tag1).flatten()
 }
 
-fn date_from_ymd(output: (Input, (i32, u32, u32))) -> Option<Token<NaiveDate>> {
-    let (pos, (y, m, d)) = output;
+/// Parse an individual task from the input.
+///
+pub fn task1(input: Span) -> IResult<Span, Task> {
+    let parts = (
+        opt(xspace1(map(tag("x"), Token::new))),
+        opt(xspace1(item(map(
+            delimited(tag("("), one_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), tag(")")),
+            // Safety: The one_of combinator ensures uppercase is 65..=90.
+            |uppercase| unsafe { mem::transmute::<u8, Priority>(uppercase as _) },
+        )))),
+        opt(xspace1(item(date))),
+        opt(xspace1(item(date))),
+        map(rest, Token::new),
+    );
 
-    Some(Token::new(
-        Span::locate(&pos, 10),
-        NaiveDate::from_ymd_opt(y, m, d)?,
-    ))
+    let mut parser = map(
+        map_parser(not_line_ending, parts),
+        |(x, priority, mut finished_on, mut started_on, description)| {
+            if started_on.is_none() {
+                mem::swap(&mut finished_on, &mut started_on);
+            }
+
+            Task {
+                x,
+                priority,
+                finished_on,
+                started_on,
+                description,
+            }
+        },
+    );
+
+    parser.parse_complete(input)
 }
 
-fn eol(input: Input) -> IResult<Input, ()> {
-    let mut rest = input;
-
-    while let Ok((next, _)) = line_ending::<_, Error>(rest) {
-        rest = next;
-    }
-
-    Ok((rest, ()))
-}
-
-fn parse_to<'a, R, P>(parser: P) -> impl Parser<Input<'a>, Output = R, Error = Error<'a>>
-where
-    R: FromStr,
-    P: Parser<Input<'a>, Output = Input<'a>, Error = Error<'a>>,
-{
-    map_res(parser, |output| output.fragment().parse())
-}
-
-fn task_from_parts(parts: Parts) -> Task {
-    let (pos, x, priority, completed_on, started_on, description) = parts;
-
-    Task {
-        line: pos.location_line(),
-        x: x.map(|value| Token::new(Span::locate(&pos, 1), value)),
-        priority: priority.map(|(pos, uppercase, _)| {
-            Token::new(
-                Span::locate(&pos, 3),
-                // Safety:
-                // The one_of combinator ensures uppercase is 65..=90.
-                unsafe { mem::transmute::<u8, Priority>(uppercase as u8) },
-            )
-        }),
-        completed_on: completed_on.and_then(date_from_ymd),
-        started_on: started_on.and_then(date_from_ymd),
-        description: Token::new(
-            Span::locate(&description, description.len()),
-            Cow::Borrowed(description.into_fragment()),
-        ),
-    }
-}
-
-fn trim_end(input: Input) -> Input {
-    // Safety:
-    // We do not changing the original offset. The returned input can always
-    // produce valid index range.
-    unsafe {
-        Input::new_from_raw_offset(
-            input.location_offset(),
-            input.location_line(),
-            input.into_fragment().trim_end(),
-            (),
-        )
-    }
-}
-
-fn word(input: Input) -> IResult<Input, Input> {
-    take_while1(|c: char| !c.is_whitespace()).parse(input)
-}
-
-fn ymd(input: Input) -> IResult<Input, (i32, u32, u32)> {
-    let mut parser = (
+fn date(input: Span) -> IResult<Span, NaiveDate> {
+    let triple = (
         terminated(parse_to(take(4usize)), tag("-")),
         terminated(parse_to(take(2usize)), tag("-")),
         parse_to(take(2usize)),
     );
 
-    parser.parse(input)
+    map_opt(triple, |(y, m, d)| NaiveDate::from_ymd_opt(y, m, d)).parse_complete(input)
 }
 
-impl Span {
-    pub(crate) fn locate(input: &Input, len: usize) -> Self {
-        let start = input.get_utf8_column() - 1;
-        Self(start, start + len)
-    }
+fn item<'a, P>(
+    mut parser: P,
+) -> impl Parser<Span<'a>, Output = Token<'a, P::Output>, Error = Error<'a>>
+where
+    P: Parser<Span<'a>, Error = Error<'a>>,
+{
+    move |input| {
+        let (rest, value) = parser.parse_complete(input)?;
+        let span = input.take(input.offset(&rest)).map_extra(|_| value);
 
-    pub(crate) fn locate_from(input: &Input, len: usize, offset: usize) -> Self {
-        let mut span = Self::locate(input, len);
-
-        span.0 += offset;
-        span.1 += offset;
-
-        span
+        Ok((rest, Token::new(span)))
     }
 }
 
-impl<T> Token<T> {
-    /// A reference to value of the associated item.
+fn not_line_ending(input: Span) -> IResult<Span, Span> {
+    let (mut rest, line) = is_not("\r\n").parse_complete(input)?;
+
+    if rest.starts_with("\r\n") {
+        rest = rest.take_from(2);
+    } else if rest.starts_with("\n") || rest.starts_with("\r") {
+        rest = rest.take_from(1);
+    }
+
+    Ok((rest, line))
+}
+
+fn parse_to<'a, R, P>(parser: P) -> impl Parser<Span<'a>, Output = R, Error = Error<'a>>
+where
+    R: FromStr,
+    P: Parser<Span<'a>, Output = Span<'a>, Error = Error<'a>>,
+{
+    map_res(parser, |output| output.fragment().parse())
+}
+
+fn word(input: Span) -> IResult<Span, Span> {
+    take_till1(char::is_whitespace).parse_complete(input)
+}
+
+/// Apply the provided parser to the input until one or more space or tab
+/// character is found.
+///
+fn xspace1<'a, P>(parser: P) -> impl Parser<Span<'a>, Output = P::Output, Error = P::Error>
+where
+    P: Parser<Span<'a>>,
+{
+    terminated(parser, space1)
+}
+
+impl<T> Token<'_, T> {
+    /// A str to the source from which self was recognized.
+    ///
+    pub fn fragment(&self) -> &str {
+        self.span.fragment()
+    }
+
+    /// A reference to the literal value of the token.
     ///
     pub fn value(&self) -> &T {
-        &self.value
+        &self.span.extra
     }
 
+    pub fn line(&self) -> u32 {
+        self.span.location_line()
+    }
+
+    /// The UTF-8 column number of self in the parser input.
+    ///
+    pub fn column(&self) -> usize {
+        self.span.get_utf8_column()
+    }
+
+    /// The start and end byte index of self in the parser input.
+    ///
+    pub fn offset(&self) -> (usize, usize) {
+        let span = &self.span;
+        let start = span.location_offset();
+
+        (start, start + span.len())
+    }
+
+    /// The index of the first byte of self in the parser input.
+    ///
     pub fn start(&self) -> usize {
-        self.span.0
+        self.span.location_offset()
     }
 
+    /// The index of the last byte of self in the parser input.
+    ///
     pub fn end(&self) -> usize {
-        self.span.1
+        let span = &self.span;
+        span.location_offset() + span.len()
     }
 }
 
-impl<T> Token<T> {
-    pub(crate) fn new(span: Span, value: T) -> Self {
-        Self { span, value }
-    }
-
-    pub(crate) fn map<U, F>(self, f: F) -> Token<U>
-    where
-        F: FnOnce(T) -> U,
-    {
-        Token {
-            value: f(self.value),
-            span: self.span,
-        }
+impl<'a, T> Token<'a, T> {
+    #[inline]
+    fn new(span: Span<'a, T>) -> Self {
+        Self { span }
     }
 }
 
-impl<T: PartialEq> PartialEq for Token<T> {
-    fn eq(&self, other: &Self) -> bool {
-        self.value().eq(other.value())
-    }
-}
-
-impl<T: PartialOrd> PartialOrd for Token<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.value().partial_cmp(other.value())
+impl<'a, T: Copy> Token<'a, T> {
+    #[inline]
+    pub(crate) fn to_span(&self) -> Span<'a, T> {
+        self.span
     }
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
-    fn test_parse_tags() {
-        let input = "feed the tomato plants @home +garden due:2025-06-10";
-        let tags = super::tags(0, input).collect::<Vec<_>>();
+    fn test_from_str() {
+        assert_eq!(super::from_str("feed tomato plants").count(), 1);
+        assert_eq!(
+            super::from_str("feed tomato plants\n  water palm\nfeed monstera").count(),
+            3
+        );
+    }
 
-        assert_eq!(tags.len(), 3);
+    #[test]
+    fn test_not_line_ending() {
+        const INPUTS: [&str; 2] = [
+            "read until new line\r\nline 2",
+            "read until new line\nline 2",
+        ];
+
+        for input in INPUTS.into_iter() {
+            let (line2, line1) = super::not_line_ending(input.into()).unwrap();
+
+            assert_eq!(
+                line1.into_fragment(),
+                "read until new line",
+                "the input is read until the terminating sequence is reached",
+            );
+
+            assert_eq!(
+                line2.into_fragment(),
+                "line 2",
+                "the terminating sequence is removed from the output",
+            );
+        }
+    }
+
+    #[test]
+    fn test_task1() {
+        super::task1("feed tomato plants".into()).unwrap();
+        super::task1("x feed tomato plants".into()).unwrap();
+        super::task1("(A) feed tomato plants".into()).unwrap();
+        super::task1("2025-06-15 feed tomato plants".into()).unwrap();
+        super::task1("2025-06-15 2025-06-15 feed tomato plants".into()).unwrap();
     }
 }

@@ -11,13 +11,18 @@
 }
 
 .header {
-  @apply absolute top-0 right-4.5 left-4.5 h-16 text-2xl select-none;
+  @apply absolute top-0 right-4.5 left-4.5 h-16 text-3xl select-none;
   background: var(--color-midnight);
   line-height: 4rem;
 }
 
 .input {
-  @apply min-h-full w-full px-4.5 pt-16 pb-4 text-sm text-gray-200 leading-relaxed;
+  @apply min-h-full w-full px-4.5 pt-16 pb-4 text-gray-200 leading-relaxed;
+  font-size: 0.9375rem;
+}
+
+.output {
+  font-size: 0.9375rem;
 }
 
 .pane {
